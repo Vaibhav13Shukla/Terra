@@ -142,24 +142,38 @@ API is running.
 
 ## Testing & evaluation
 
-Unit tests cover NDVI math, percentage change, geometry validation, schema rules,
-scene filtering, and intent parsing. Contract tests pin the API and provider
-interface. `evaluation/scenarios/` defines deterministic end-to-end cases
-(healthy vegetation, decline, no scenes, invalid geometry, unsupported question…).
+83 tests total. 80 run by default, fully offline and deterministic (no
+network, no AWS credentials needed): unit tests cover NDVI math, percentage
+change, geometry validation, schema rules, scene filtering/capping, intent
+parsing, and the Bedrock adapter's mandatory graceful fallback. Contract
+tests pin the API's request/response shapes and HTTP status codes. The
+remaining 3 are opt-in (`pytest -m network`) and run against the real Earth
+Search STAC API and live Sentinel-2 data — see
+[`evaluation/scenarios/README.md`](evaluation/scenarios/README.md) for the
+required scenario coverage (§36) mapped to specific tests, and
+[`docs/adr/002-processing-runtime.md`](docs/adr/002-processing-runtime.md)
+for what running against live data actually found (two real bugs, fixed and
+regression-tested) and fixed (a 6.2x latency improvement, live-verified).
 
 ## Security
 
-No secrets are committed (`.gitignore` excludes `.env`, keys, credentials).
-Deployed infrastructure uses IAM roles with least privilege — the API and worker
-Lambdas get only the S3/DynamoDB/Bedrock permissions they need, never
-`AdministratorAccess`. AWS credentials are never exposed to the frontend.
+No secrets are committed — verified with a repo-wide scan for AWS access
+keys, private key headers, and inline credentials (clean); `.gitignore`
+excludes `.env`, keys, and credential files, and none are tracked (verified
+via `git ls-files`). Deployed infrastructure uses IAM roles scoped to Terra's
+own DynamoDB table, its own S3 bucket, and `bedrock:InvokeModel` only —
+never `AdministratorAccess`. AWS credentials are never exposed to the
+frontend.
 
 ## Deployment status
 
-The AWS infrastructure is defined as code in [`infra/`](infra/). **Deploy is
-pending the team's AWS credentials** — the template is written and validated but
-not yet applied from this environment. Deploy steps are documented in
-[`infra/README.md`](infra/README.md).
+The AWS infrastructure is defined as code in [`infra/`](infra/) (AWS SAM;
+YAML-validated). **Deploy is pending the team's AWS credentials** — not yet
+applied from this environment. Deploy steps are documented exactly in
+[`infra/README.md`](infra/README.md). The full application pipeline (not the
+infrastructure — the actual discover→NDVI→evidence logic) has been verified
+end-to-end against **live** Sentinel-2 data through the real running API
+server, independent of any AWS deployment.
 
 ## AI coding tools
 
