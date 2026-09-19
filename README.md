@@ -9,8 +9,10 @@ out unusable scenes, computes the metric from the actual pixels, compares period
 and shows exactly how it got the number.
 
 > Built for the **First Commit × AWS** hackathon (SHIP IT track).
-> Frontend is developed separately by the team; **this repository is the backend,
-> Earth-Observation processing engine, AI orchestration, tests, and AWS infrastructure.**
+> This repository is the backend, Earth-Observation processing engine, AI
+> orchestration, AWS infrastructure, tests, **and the frontend** (`frontend/` —
+> a Next.js app with a 3D/scroll-animated landing page, Cognito auth, and an
+> AOI-map workspace; see `frontend/README.md`).
 
 ---
 

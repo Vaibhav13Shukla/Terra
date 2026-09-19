@@ -5,8 +5,10 @@ status, what's left, how to run everything, and the hard-won lessons.
 
 **Terra** = "Earth Observation, without the plumbing." Turns a natural-language
 geospatial question into a reproducible, evidence-backed satellite analysis.
-This repo is **backend + EO engine + AI orchestration + AWS infra + tests**.
-The frontend is built separately by the team.
+This repo is **backend + EO engine + AI orchestration + AWS infra + tests +
+frontend**. `frontend/` is a Next.js app (3D/scroll-animated landing page +
+Cognito auth + map workspace); see `frontend/README.md` and
+`docs/FRONTEND_DESIGN.md` for its design spec.
 
 ## Golden rules (do not break)
 
@@ -41,6 +43,8 @@ The frontend is built separately by the team.
 - `backend/app/api/` — FastAPI app (`/v1/analyses`, `/health`), Lambda via Mangum.
 - `infra/` — SAM template (API + worker Lambda, Cognito, SQS+DLQ).
 - `docs/DEPLOYMENT.md` — step-by-step AWS deployment runbook.
+- `docs/FRONTEND_DESIGN.md` — frontend design spec (tokens, layout, components).
+- `frontend/` — Next.js app: landing page, Cognito auth, AOI-map workspace.
 - `evaluation/` — deterministic scenarios.
 
 ## Commands

@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------- */
+/* Terra design tokens                                                     */
+/* Dark-first "instrument panel" aesthetic: near-black canvas, hairline    */
+/* borders instead of shadows, restrained color spent only on semantic     */
+/* meaning (NDVI direction, status) plus one spectral brand gradient       */
+/* reserved for hero/brand moments (evokes an NDVI false-color ramp:       */
+/* water -> vegetation -> bare soil).                                     */
+/* ---------------------------------------------------------------------- */
+
+:root {
+  --color-canvas: #07080a;
+  --color-surface: #101216;
+  --color-surface-raised: #16181d;
+  --color-inset: #1a1d22;
+
+  --color-border: #23262b;
+  --color-border-strong: #383c44;
+
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #9aa0aa;
+  --color-text-tertiary: #5b6068;
+
+  --color-accent: #52d9c4;
+  --color-accent-strong: #7de6d6;
+
+  --color-positive: #4ade80;
+  --color-negative: #f87171;
+  --color-warning: #fbbf63;
+
+  --gradient-spectral: linear-gradient(
+    100deg,
+    #3b82f6 0%,
+    #22d3aa 35%,
+    #a3e635 70%,
+    #fdba46 100%
+  );
+
+  --glass-bg: rgba(16, 18, 22, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+}
+
+@theme inline {
+  --color-canvas: var(--color-canvas);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-inset: var(--color-inset);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
+  --color-accent: var(--color-accent);
+  --color-accent-strong: var(--color-accent-strong);
+  --color-positive: var(--color-positive);
+  --color-negative: var(--color-negative);
+  --color-warning: var(--color-warning);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-mono-data);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: #05100e;
+}
+
+/* Utility: glass panel used for every floating/overlay surface (inspector
+   panel, auth cards, feature cards on the landing page). */
+.glass-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* Utility: hairline-bordered flat surface (no blur) for in-app chrome. */
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.text-mono-num {
+  font-family: var(--font-mono-data), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.spectral-text {
+  background: var(--gradient-spectral);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.spectral-glow {
+  box-shadow: 0 0 120px 20px rgba(34, 211, 170, 0.15);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* MapLibre ships a light basemap by default; invert it to match the dark
+   instrument-panel theme rather than pulling in a paid dark tile provider.
+   Controls rendered inside the same container invert along with it, which
+   conveniently also flips them from light-chrome to dark-chrome. */
+.map-canvas {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.92)
+    saturate(0.85);
+}
