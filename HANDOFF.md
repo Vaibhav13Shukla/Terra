@@ -1,9 +1,11 @@
 # Terra — Handoff (read this first)
 
 Written so anyone (or any Claude Code session) can continue without the original
-chat. State as of the `feat: Cognito auth, async SQS worker, CI, AWS deployment
-runbook` commit on `main`. Everything described here is pushed; nothing lives
-only on one laptop except the local `.venv`.
+chat. State as of the `feat: add Next.js frontend (3D landing page, Cognito
+auth, AOI workspace)` commit (`598dd67`) on branch `claude/peaceful-gauss-osu4cl`
+— **not yet merged to `main`**, open it as a PR or merge it before continuing.
+Everything described here is pushed; nothing lives only on one laptop/session
+except each dev's local `.venv` / `node_modules`.
 
 ## What Terra is
 
@@ -35,30 +37,47 @@ against a real deploy — see `docs/DEPLOYMENT.md`).
 | Structured logging, bounded retry/backoff, HTTP timeouts | done |
 | IaC (SAM template: API + worker Lambda, Cognito, SQS+DLQ, throttling) | written, `cfn-lint`-clean, **NOT deployed** |
 | CI (GitHub Actions: ruff + pytest + cfn-lint on push/PR) | done |
-| Docs: architecture, ADR 001/002/003, RISKS, HACKATHON_WRITEUP, eval scenarios, `docs/DEPLOYMENT.md` runbook | done |
+| Docs: architecture, ADR 001/002/003, RISKS, HACKATHON_WRITEUP, eval scenarios, `docs/DEPLOYMENT.md` runbook, `docs/FRONTEND_DESIGN.md` | done |
+
+**Frontend: built in this repo now (`frontend/`), not "separate" anymore —
+see the "Frontend, from scratch" section below.** Verified with `next
+build`/`next lint` (clean) and Playwright screenshots of every route; never
+run against a real deployed backend or a real Cognito pool.
 
 ## What is NOT done (in priority order)
 
-1. **AWS deploy** — needs someone's AWS credentials. Full step-by-step:
+1. **Merge `claude/peaceful-gauss-osu4cl` into `main`** (or open a PR and
+   review it first) — everything in this handoff is on that branch only.
+   `git fetch && git checkout claude/peaceful-gauss-osu4cl` to get it.
+2. **AWS deploy** — needs someone's AWS credentials. Full step-by-step:
    `docs/DEPLOYMENT.md` (account setup, Bedrock model access, Cognito test
    user, first deploy, smoke test, cost controls, teardown). This is also the
    first real test of `DynamoDBJobStore.from_table_name`, the container
    build, Cognito verification against a real pool, SQS enqueue/consume, and
    Bedrock model access — budget time for surprises, same as before.
-2. **Frontend** — team builds it separately. Contract: `docs/openapi.json`
-   (regenerate with `python scripts/export_openapi.py` after any API change).
-   Needs `CognitoUserPoolId`/`CognitoAppClientId` from the deploy outputs
-   once auth is wired into their login flow (`docs/DEPLOYMENT.md` §6).
-3. **Demo video** (<=3 min, judging gives no credit for what isn't shown).
+3. **Deploy the frontend** — it exists (`frontend/`) but has never been
+   deployed anywhere; it only ran in a throwaway dev-server session with no
+   public URL. Fastest path: https://vercel.com/new, import this repo, set
+   **Root Directory to `frontend`**, deploy. Then set its env vars
+   (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_COGNITO_USER_POOL_ID`,
+   `NEXT_PUBLIC_COGNITO_APP_CLIENT_ID` — see `frontend/.env.local.example`)
+   once the backend is deployed (step 2) and redeploy.
+4. **Wire the two together**: once both are deployed, redeploy the backend
+   with `FrontendOrigin=<the real Vercel/custom domain>` (defaults to `*` —
+   `docs/DEPLOYMENT.md` §10), and set the frontend's env vars to point at
+   the real `ApiUrl`/Cognito ids from the SAM deploy outputs.
+5. **Demo video** (<=3 min, judging gives no credit for what isn't shown).
    Plan: fixtures path first (deterministic ~18% NDVI decline), then one live
    Sentinel-2 run to show it's real. Say out loud which is which. The live result
    is genuinely near-zero change (-0.2%) for the demo AOI; that is honest, not a bug.
-4. After the frontend has a real deployed origin, redeploy with
-   `FrontendOrigin=<real origin>` (defaults to `*` for early development —
-   `docs/DEPLOYMENT.md` §10).
-5. Decide whether to flip `AuthEnabled=true` before submission (depends on
+6. Decide whether to flip `AuthEnabled=true` before submission (depends on
    whether the hackathon rubric rewards real user auth, and whether the
    frontend's login flow is ready — `docs/DEPLOYMENT.md` §6).
+7. Swap the frontend's map basemap: it currently uses MapLibre's free
+   `demotiles.maplibre.org` style (zero API keys, but minimal — just country
+   outlines) with a CSS `invert()` filter hack to make it dark. Fine for a
+   demo, not for a real launch — get a MapTiler/Mapbox key and swap
+   `DEMO_STYLE` in `frontend/components/AOIMap.tsx`.
 
 ## Run it
 
@@ -74,6 +93,41 @@ cd backend
 
 `boto3` is intentionally not required locally (Bedrock/DynamoDB code lazy-imports
 it and degrades gracefully). If pip times out on it, that's a flaky network, not a bug.
+
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local   # fill in Cognito ids once you have them
+npm run dev                        # http://localhost:3000
+```
+
+The landing page and auth screens work with no backend running; `/workspace`
+needs the backend up (`NEXT_PUBLIC_API_URL`, defaults to `http://localhost:8000`).
+
+## Frontend, from scratch (what exists, what doesn't)
+
+`frontend/` is a Next.js 16 (App Router, Turbopack) app — landing page +
+Cognito auth + AOI-drawing workspace. Design spec: `docs/FRONTEND_DESIGN.md`.
+Stack: Tailwind v4, Framer Motion, React Three Fiber (the landing page's
+wireframe-globe hero), MapLibre GL JS, `amazon-cognito-identity-js`, Zustand.
+
+- `lib/types.ts` and `lib/api.ts` are hand-typed against
+  `backend/app/domain/models.py` / `docs/openapi.json` — keep them in sync
+  manually if the API contract changes; nothing generates them automatically.
+- `lib/auth.ts` wraps Cognito's SRP flow via `amazon-cognito-identity-js`.
+  Untested against a real pool — the deployed app client only allows
+  `ALLOW_USER_SRP_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH` (see
+  `infra/template.yaml`'s `TerraUserPoolClient`), which is what this library
+  uses, so it should work, but budget time for the first real login to
+  surface something.
+- The workspace's map (`components/AOIMap.tsx`) draws an AOI by
+  click-to-add-vertex, double-click to close — no undo/edit-vertex UI. It's
+  MapLibre with the free `demotiles.maplibre.org` style, inverted via CSS
+  filter for a dark theme (see item 7 above — swap this before a real launch).
+- The app has never been deployed or connected to a real backend — see "What
+  is NOT done" above. It was verified by running `next build`/`next lint`
+  (both clean) and screenshotting every route with a headless Chromium
+  (Playwright), not by a human clicking through it in a real browser yet.
 
 ## Demo AOI (verified live to have 17-20 low-cloud scenes per period)
 
@@ -124,6 +178,38 @@ provider `sentinel-2-l2a` (real) or `fixtures` (deterministic).
   (else it strands in `created` forever). Covered by a regression test.
 - The LLM never computes a number. Deterministic code does all science; Bedrock is
   optional, only maps question->intent and explains results, with automatic fallback.
+- **Next.js 16 broke `create-next-app`'s own defaults**: `next/dynamic` with
+  `ssr: false` is no longer allowed inside a Server Component — the landing
+  page needed `"use client"` at the top. `maplibre-gl`'s package has no
+  default export (v6+) — import named exports (`{ Map, NavigationControl }`),
+  not `import maplibregl from "maplibre-gl"`. The new stricter
+  `react-hooks/purity` ESLint rule flags `Math.random()` inside `useMemo`
+  (used for the starfield) as an "impure render" — moved that generation to
+  module scope instead, run once at import time.
+- **A 3D hero can eat its own headline.** The globe under the landing page's
+  H1 first shipped at full opacity/size and made the text unreadable —
+  caught by actually screenshotting it (not just "it compiles"), fixed with
+  lower wireframe opacity, fewer segments, a `position` offset pushing the
+  globe down, and a radial-gradient scrim behind the text.
+- **`whileInView` (Framer Motion) content looks broken in a naive full-page
+  screenshot** — it renders at `opacity: 0` until actually scrolled into
+  view (IntersectionObserver-driven), so a single `fullPage` screenshot
+  without incremental scrolling shows empty boxes below the fold. Not a bug;
+  scroll the page (or screenshot in viewport-sized chunks) to verify it.
+- **This sandboxed session has no way to expose a public URL.** Outbound
+  network only — no port-forwarding/tunnel tool exists here, regardless of
+  GitHub/other access grants (those are unrelated capabilities). `npm run
+  dev` only proves the app renders inside the session (verified via
+  Playwright + a local Chromium at `/opt/pw-browsers/chromium`, matched to
+  a matching `playwright-core` version installed with `--no-save` so it
+  never touched `package.json`/lockfile). A real preview link requires an
+  actual deploy (Vercel) or running it on your own machine.
+- **This session's egress proxy blocks domains by org policy, not
+  transiently** — `styles.refero.design`, `api.refero.design`, and
+  `demotiles.maplibre.org` (the map's tile source) were all rejected with a
+  403 at the proxy level from inside this sandbox. That's this sandbox's own
+  policy; it does not mean these services are broken or blocked for a real
+  deployed frontend running on someone's own machine/Vercel.
 
 ## Conventions
 
@@ -135,7 +221,10 @@ bugs late in the build.
 
 ## Continuing from another laptop
 
-Clone the repo, create the venv as above, open Claude Code in the repo folder; it
-loads `CLAUDE.md`, which points here. The original chat transcript is not in git.
-Use your own Claude/GitHub account rather than sharing one login (add collaborators
-on GitHub).
+Clone the repo and **check out `claude/peaceful-gauss-osu4cl`** (not `main` —
+this branch is 7 commits ahead of `main` and the entire frontend only exists
+here; merge or PR it into `main` first if you want `main` to be current). Create the backend venv and frontend `node_modules` as above ("Run
+it"). Open Claude Code in the repo folder; it loads `CLAUDE.md`, which points
+here. The original chat transcript is not in git — this file and the code are
+the entire handoff. Use your own Claude/GitHub account rather than sharing one
+login (add collaborators on GitHub).
