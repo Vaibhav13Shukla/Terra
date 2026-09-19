@@ -196,8 +196,20 @@ def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
         ):
             result = run_analysis(provider, request)
     except AnalysisError as exc:
+        # Invalid input (bad AOI): the request itself was wrong.
         job_store.fail(job.job_id, str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # Anything else (STAC outage after exhausting retries, a provider
+        # bug, ...) must still resolve the job to FAILED — otherwise it's
+        # stranded in CREATED forever and GET /v1/analyses/{id} can never
+        # report a status the polling contract can interpret (§26, §60).
+        # timed_event already logged this with status="error" before
+        # re-raising; this only decides the job/HTTP outcome.
+        job_store.fail(job.job_id, str(exc))
+        raise HTTPException(
+            status_code=502, detail=f"analysis could not be completed: {exc}"
+        ) from exc
 
     log_event(
         "analysis_result",

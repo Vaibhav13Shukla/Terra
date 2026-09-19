@@ -18,8 +18,8 @@ from __future__ import annotations
 import os
 
 import rasterio
-import requests.exceptions
 from pystac_client import Client
+from pystac_client.exceptions import APIError
 from rasterio.enums import Resampling
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
@@ -65,14 +65,42 @@ _GDAL_ENV = {
 
 # STAC search over HTTP has no comparable built-in retry, so it goes through
 # app.services.retry explicitly. Only genuinely transient failure modes are
-# retried — never a malformed request (§28). Note: requests.exceptions.
-# ConnectionError/Timeout are NOT subclasses of the built-in ConnectionError/
-# TimeoutError (verified) — using the built-ins here would silently retry on
-# nothing, since pystac_client's search() raises the requests variants.
-_STAC_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    requests.exceptions.ConnectionError,
-    requests.exceptions.Timeout,
-)
+# retried — never a malformed request (§28).
+#
+# Verified directly (not assumed) that pystac_client.StacApiIO.request()
+# wraps EVERY failure — including network-level requests.exceptions.
+# ConnectionError/Timeout — into pystac_client.exceptions.APIError, discarding
+# the original exception type:
+#
+#     except Exception as err:
+#         raise APIError(str(err))
+#
+# So catching the requests-layer exceptions directly (an earlier version of
+# this module did) is a silent no-op: they never propagate that far. APIError
+# itself covers both transient failures (network errors, 5xx) and permanent
+# ones (4xx — malformed query, not found), which must NOT be retried (§28).
+# APIError.status_code is only set for real HTTP responses
+# (APIError.from_response); it's absent entirely for wrapped network
+# exceptions — verified via inspect.getsource(pystac_client.exceptions).
+# _TransientStacError marks exactly the retry-worthy subset.
+class _TransientStacError(RuntimeError):
+    """A STAC APIError classified as transient (network failure or 5xx)."""
+
+
+_STAC_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (_TransientStacError,)
+
+
+def _classify_stac_search(search) -> list:
+    """Materialize a STAC search's results, reclassifying APIError into
+    :class:`_TransientStacError` (retry-worthy) or leaving it as-is
+    (non-transient — a 4xx should fail immediately, not be retried)."""
+    try:
+        return list(search.items())
+    except APIError as exc:
+        status = getattr(exc, "status_code", None)
+        if status is None or status >= 500:
+            raise _TransientStacError(str(exc)) from exc
+        raise  # 4xx: not transient — propagate unchanged, do not retry
 
 
 class Sentinel2Provider(DataProvider):
@@ -111,8 +139,11 @@ class Sentinel2Provider(DataProvider):
         )
         # The actual HTTP request(s) happen lazily during iteration/pagination
         # (search.items()), not at .search() itself — retry that call (§28).
+        # _classify_stac_search reclassifies pystac_client's APIError so only
+        # genuinely transient failures (network error, 5xx) get retried.
         items = retry_with_backoff(
-            lambda: list(search.items()), exceptions=_STAC_RETRYABLE_EXCEPTIONS
+            lambda: _classify_stac_search(search),
+            exceptions=_STAC_RETRYABLE_EXCEPTIONS,
         )
         scenes: list[Scene] = []
         for item in items:

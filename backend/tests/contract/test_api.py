@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from app.api import deps
 from app.api.main import app
+from app.domain.models import AOI, DateRange, Scene
+from app.providers.base import DataProvider, ProviderRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -250,3 +252,48 @@ def test_ndvi_change_without_explicit_comparison_dates_defaults_to_prior_period(
     # comparison window should be July 2025 (31 days ending 2025-07-31)
     comparison_range = job["request"]["comparison_range"]
     assert comparison_range["end"] == "2025-07-31"
+
+
+class _AlwaysFailsProvider(DataProvider):
+    """Regression fixture: a provider whose search() raises an unexpected
+    exception (e.g. what RetryExhaustedError looks like after every retry
+    attempt is exhausted on a real STAC outage)."""
+
+    name = "always-fails"
+    supported_bands = ("red", "nir", "scl")
+
+    def search(self, aoi: AOI, date_range: DateRange, cloud_threshold: float, limit: int = 20):
+        raise RuntimeError("simulated STAC outage")
+
+    def read_window(self, scene: Scene, band_key: str, aoi: AOI, out_shape=None):
+        raise AssertionError("should never be reached")
+
+
+def test_unexpected_provider_failure_fails_job_not_stranded_in_created(
+    client: TestClient,
+):
+    """Regression test: an unexpected exception from the provider (not
+    AnalysisError) must still resolve the job to FAILED, not leave it stuck
+    in CREATED forever with no way for a poller to know what happened."""
+    deps.bootstrap_providers()
+    ProviderRegistry.register(_AlwaysFailsProvider())
+
+    body = {
+        "aoi": _demo_aoi(),
+        "start_date": "2025-08-01",
+        "end_date": "2025-08-31",
+        "analysis": "ndvi_snapshot",
+        "provider": "always-fails",
+    }
+    resp = client.post("/v1/analyses", json=body)
+    assert resp.status_code == 502
+
+    # The job must exist and be resolved to failed, not stuck in "created".
+    jobs = client.get("/v1/analyses").json()
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job["status"] == "failed"
+    assert "simulated STAC outage" in job["error"]
+
+    fetched = client.get(f"/v1/analyses/{job['job_id']}").json()
+    assert fetched["status"] == "failed"
