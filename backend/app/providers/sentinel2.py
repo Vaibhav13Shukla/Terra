@@ -28,6 +28,12 @@ COLLECTION = "sentinel-2-l2a"
 _DEFAULT_SCALE = 0.0001
 _DEFAULT_OFFSET = -0.1
 
+# Server-side pre-filter cap: an optimization to avoid pulling back scenes that
+# are unusable at any plausible threshold, while still letting the downstream
+# quality filter reject-with-reason anything between the user's cloud_threshold
+# and this cap. Not the same as the user's threshold — see search().
+SEARCH_CLOUD_COVER_CAP = 80.0
+
 # GDAL tuning for efficient anonymous remote COG access.
 _GDAL_ENV = {
     "AWS_NO_SIGN_REQUEST": "YES",
@@ -58,11 +64,18 @@ class Sentinel2Provider(DataProvider):
         cloud_threshold: float,
         limit: int = 20,
     ) -> list[Scene]:
+        # Query a generous server-side cloud cap — not the user's exact
+        # threshold — so scenes between cloud_threshold and the cap still come
+        # back and get rejected *downstream* by app.services.quality_filter,
+        # with an evidence-visible reason (§7.4, §11). Without this, a
+        # STAC-side filter would silently drop those scenes and the evidence
+        # panel could never explain why they were excluded.
+        search_cap = max(cloud_threshold, SEARCH_CLOUD_COVER_CAP)
         search = self._stac().search(
             collections=[COLLECTION],
             bbox=list(aoi.bbox()),
             datetime=date_range.as_stac_datetime(),
-            query={"eo:cloud_cover": {"lt": cloud_threshold}},
+            query={"eo:cloud_cover": {"lt": search_cap}},
             max_items=limit,
         )
         scenes: list[Scene] = []

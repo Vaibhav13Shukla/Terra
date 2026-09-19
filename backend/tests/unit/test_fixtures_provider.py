@@ -25,7 +25,10 @@ def _aoi() -> AOI:
     )
 
 
-def test_search_respects_date_range_and_cloud_threshold():
+def test_search_respects_date_range_but_not_cloud_threshold():
+    """search() returns all date-matching candidates, cloudy or not — cloud
+    filtering is the authoritative job of app.services.quality_filter, so
+    that rejected scenes keep an evidence-visible reason (§7.4)."""
     provider = demo_decline_provider()
     scenes = provider.search(
         _aoi(),
@@ -33,7 +36,7 @@ def test_search_respects_date_range_and_cloud_threshold():
         cloud_threshold=20.0,
     )
     ids = {s.id for s in scenes}
-    assert ids == {"fx-aug-01", "fx-aug-02"}  # cloudy August scene excluded
+    assert ids == {"fx-aug-01", "fx-aug-02", "fx-aug-cloudy"}
 
 
 def test_search_july_period():
@@ -44,7 +47,7 @@ def test_search_july_period():
         cloud_threshold=20.0,
     )
     ids = {s.id for s in scenes}
-    assert ids == {"fx-jul-01", "fx-jul-02"}
+    assert ids == {"fx-jul-01", "fx-jul-02", "fx-jul-cloudy"}
 
 
 def test_read_window_yields_expected_ndvi():

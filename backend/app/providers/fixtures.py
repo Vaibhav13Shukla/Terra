@@ -57,13 +57,17 @@ class FixturesProvider(DataProvider):
         cloud_threshold: float,
         limit: int = 20,
     ) -> list[Scene]:
+        # cloud_threshold is intentionally NOT applied here: search() returns
+        # every date-matching candidate (mirroring a generous server-side STAC
+        # pre-filter), and app.services.quality_filter makes the authoritative
+        # accept/reject decision against the user's threshold. This is what
+        # lets rejected scenes carry an evidence-visible rejection_reason
+        # instead of silently disappearing (§7.4, §11).
+        del cloud_threshold
         out: list[Scene] = []
         for fx in self._scenes.values():
             d = fx.datetime.date()
             if not (date_range.start <= d <= date_range.end):
-                continue
-            if fx.cloud_cover >= cloud_threshold:
-                # mirror server-side pre-filter; authoritative filter is downstream
                 continue
             assets = {
                 b: DataAsset(key=b, href=f"fixture://{fx.id}/{b}")
