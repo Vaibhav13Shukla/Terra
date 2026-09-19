@@ -22,7 +22,7 @@ canonical demo AOI/period (central California farmland, Aug 2025 vs Jul 2025):
 |---|---|
 | No scene cap (search returns ~20 low-cloud scenes/period) | **>120s, timed out** |
 | Capped to 4 least-cloudy scenes/period, read serially | **116.1s** |
-| Capped to 4 scenes/period, read concurrently (ThreadPoolExecutor) | **18.6s** |
+| Capped to 4 scenes/period, read concurrently (ThreadPoolExecutor) | **18.6–26.1s across 3 separate live runs** |
 
 Same NDVI values in the serial and concurrent runs (0.5613 / 0.5624,
 `scenes_used=8`, `scenes_rejected=32`) — the speedup is purely from
@@ -54,17 +54,21 @@ threads.
    `data_quality.valid_pixel_ratio` still surfaces confidence.
 2. **Read scenes concurrently within a period** (I/O-bound, not CPU-bound —
    measured 6.2x speedup, no correctness change).
-3. **Keep synchronous request/response** for the hackathon MVP: 18.6s for a
-   genuinely real two-period comparison is within API Gateway's 29s
-   integration timeout and acceptable for an interactive demo. This is a
-   deliberate, documented trade-off (§53): the simplest architecture that
-   satisfies the measured requirement, not the "impressive" one.
+3. **Keep synchronous request/response** for the hackathon MVP: 18.6–26.1s
+   across separate live runs for a genuinely real two-period comparison is
+   within API Gateway's 29s integration timeout and acceptable for an
+   interactive demo. This is a deliberate, documented trade-off (§53): the
+   simplest architecture that satisfies the measured requirement, not the
+   "impressive" one.
 
 ## Consequences / honest limitation
 
-18.6s has headroom but not a large margin under API Gateway's 29s hard limit,
-and network/STAC latency is variable — a slower run is plausible. This is not
-fully solved by anything in-process; the architecturally correct fix for a
+Three separate live runs after this fix measured 18.6s, 18.7s, and 26.1s —
+the slowest is 90% of API Gateway's 29s hard limit, not a comfortable margin.
+Report this as the range it is, not the optimistic end of it: network/STAC
+latency is variable, and a run slower than 26s is plausible on a bad network
+day. This is not fully solved by anything in-process; the architecturally
+correct fix for a
 guaranteed-reliable AWS deployment is the async worker Lambda the brief
 originally specifies (§26, §28): `POST` enqueues and returns in milliseconds,
 a separate worker Lambda (invoked async or via SQS) does the actual

@@ -131,7 +131,8 @@ scale/offset). Two real bugs were found and fixed during that live
 validation (wrong reflectance scale/offset; SCL/red-nir resolution
 mismatch) — see [docs/RISKS.md](RISKS.md) and
 [docs/adr/002-processing-runtime.md](adr/002-processing-runtime.md) for the
-full account, including a 6.2x latency fix (116s to 18.6s) found the same way.
+full account, including a 6.2x latency fix (116s to 18.6-26.1s across three
+separate live runs — variance is network-bound) found the same way.
 
 ## 12. Testing
 

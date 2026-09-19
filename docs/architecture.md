@@ -145,6 +145,6 @@ could not be tested without AWS credentials (§57).
 | Decision | Alternative considered | Why this one |
 |---|---|---|
 | Python backend | TypeScript (matches frontend) | Mature geospatial toolchain (rasterio/GDAL); every code example in the brief is Python |
-| Synchronous request processing, capped + concurrent scene reads | Async worker Lambda | Measured 18.6s for the real demo request after fixing two bugs found via live testing; async split is documented (ADR 002) but not built untested |
+| Synchronous request processing, capped + concurrent scene reads | Async worker Lambda | Measured 18.6-26.1s across live runs for the real demo request after fixing two bugs found via live testing (the slowest run is 90% of API Gateway's 29s limit); async split is documented (ADR 002) but not built untested |
 | Deterministic intent/explain by default, Bedrock optional | Bedrock-required | §61 mandates the core workflow not depend on Bedrock; also the only way to keep tests offline and deterministic |
 | One real provider (Sentinel-2) plus one synthetic (fixtures) | Multiple real providers | §79: don't build a second provider at the cost of reliability; the abstraction (ADR 001) makes adding one later a contained change |
