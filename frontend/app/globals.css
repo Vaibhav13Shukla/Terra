@@ -132,11 +132,36 @@ body {
   animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* MapLibre ships a light basemap by default; invert it to match the dark
-   instrument-panel theme rather than pulling in a paid dark tile provider.
-   Controls rendered inside the same container invert along with it, which
-   conveniently also flips them from light-chrome to dark-chrome. */
-.map-canvas {
-  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.92)
-    saturate(0.85);
+/* The map now uses a real satellite basemap (see components/AOIMap.tsx), so
+   the old invert()/hue-rotate() dark-mode hack — which would render imagery
+   as a negative and recolour the AOI overlay — is gone. Toning is done via
+   the raster layer's own paint properties instead. Only the controls need
+   dark chrome: */
+.map-canvas .maplibregl-ctrl-group {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+}
+.map-canvas .maplibregl-ctrl-group button {
+  filter: invert(1);
+}
+/* MapLibre's compact attribution ships a white pill with higher specificity
+   than a bare .maplibregl-ctrl-attrib rule, so target the compact variants
+   explicitly. Attribution must stay legible — it is a licence requirement. */
+.map-canvas .maplibregl-ctrl.maplibregl-ctrl-attrib,
+.map-canvas .maplibregl-ctrl-attrib.maplibregl-compact,
+.map-canvas .maplibregl-ctrl-attrib.maplibregl-compact-show {
+  background: rgba(16, 18, 22, 0.8);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--glass-border);
+}
+.map-canvas .maplibregl-ctrl-attrib-inner,
+.map-canvas .maplibregl-ctrl-attrib a {
+  color: var(--color-text-secondary);
+}
+.map-canvas .maplibregl-ctrl-attrib a:hover {
+  color: var(--color-text-primary);
+}
+.map-canvas .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
 }
