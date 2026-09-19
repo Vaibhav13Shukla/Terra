@@ -67,18 +67,22 @@ Three separate live runs after this fix measured 18.6s, 18.7s, and 26.1s —
 the slowest is 90% of API Gateway's 29s hard limit, not a comfortable margin.
 Report this as the range it is, not the optimistic end of it: network/STAC
 latency is variable, and a run slower than 26s is plausible on a bad network
-day. This is not fully solved by anything in-process; the architecturally
-correct fix for a
-guaranteed-reliable AWS deployment is the async worker Lambda the brief
-originally specifies (§26, §28): `POST` enqueues and returns in milliseconds,
-a separate worker Lambda (invoked async or via SQS) does the actual
-processing, and the client polls. The job store interface
-(`app.services.job_store.JobStore`) and status model already support this
-without an API contract change — only the wiring inside `create_analysis` in
-`app/api/main.py` would move from "call `run_analysis` inline" to "enqueue and
-return." This is documented here rather than built, because building and
-*not testing* an async Lambda-to-Lambda invocation without AWS credentials
-would be worse than an honest limitation (§57 — no fake production behavior).
+day.
+
+**Update:** the async worker Lambda described below as "documented but not
+built" now exists (`app.worker.handler`, `app.services.analysis_queue`,
+`infra/template.yaml`'s `WorkerFunction`/`AnalysesQueue`), selected via
+`TERRA_PROCESSING_MODE=async` (default remains `sync`). It reuses
+`run_analysis`/`explain_result`/`JobStore` unchanged — no API contract
+change, exactly as anticipated below. It is unit-tested offline (an SQS
+event is just a dict; consuming one needs no AWS SDK call, so
+`tests/unit/test_worker.py` and `test_analysis_queue.py` run without boto3,
+following the same Protocol+fake-object pattern as `DynamoDBJobStore`) but,
+like every AWS integration in this repo, has never been exercised against a
+real SQS queue — that first real run is step 7 in `docs/DEPLOYMENT.md`.
+Until that's done, treat this as verified logic, not a verified deployment
+(§57 — no fake production behavior, applied to the claim itself, not just
+the code).
 
 ## Alternatives considered
 

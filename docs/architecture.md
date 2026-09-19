@@ -112,14 +112,21 @@ SCL) are masked, not zeroed. Every result reports valid-pixel ratio.
 
 - No secrets in git (`.gitignore` excludes `.env`, keys, credentials —
   verified with a repo-wide scan; see the Security section of the root README).
-- IAM least privilege: the API Lambda's role is scoped to its own DynamoDB
-  table, its own S3 bucket, and `bedrock:InvokeModel` — nothing else.
+- IAM least privilege: each Lambda's role is scoped to its own DynamoDB
+  table, its own S3 bucket, `bedrock:InvokeModel`, and (API Lambda only)
+  `sqs:SendMessage` to its own queue — nothing else.
 - Input validation throughout: GeoJSON structure and bounds (Pydantic +
   shapely), dates (ordering), analysis type (enum), provider name (registry
   lookup, 400 on unknown).
-- CORS is currently permissive (`*`) for hackathon development; documented in
-  `app/api/main.py` as needing tightening to the deployed frontend's exact
-  origin.
+- CORS is configurable (`CORS_ALLOW_ORIGINS`, `FrontendOrigin` in
+  `infra/template.yaml`), defaulting to `*` for local/early development —
+  set to the deployed frontend's exact origin once known (`app/api/main.py`).
+- Auth: Cognito JWT verification (`app/auth/`), off by default
+  (`AUTH_ENABLED=false`) so local dev and the offline test suite need no
+  Cognito setup. When enabled, gates the analyses endpoints only —
+  `/health`, `/v1/providers`, `/v1/scenes` stay public discovery endpoints.
+- Security response headers (`X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Strict-Transport-Security`) on every response.
 
 ## 8. Failure handling
 
@@ -133,12 +140,14 @@ deterministic path, never a user-visible error.
 
 ## 9. Scalability
 
-The provider/job-store interfaces are already async-deployment-shaped (ADR
-002): moving from synchronous in-Lambda processing to an async worker Lambda
+The provider/job-store interfaces are async-deployment-shaped (ADR 002):
+moving from synchronous in-Lambda processing to an async worker Lambda
 requires no change to `app.services.job_store.JobStore`'s contract or the
-public API's request/response shapes — only the wiring inside
-`create_analysis` in `app/api/main.py`. Not built in this session because it
-could not be tested without AWS credentials (§57).
+public API's request/response shapes. This is now built —
+`TERRA_PROCESSING_MODE=async` enqueues to SQS (`app.services.analysis_queue`)
+and a separate worker Lambda (`app.worker.handler`) processes it — but, like
+every AWS integration in this repo, has not yet been exercised against real
+AWS infrastructure; see ADR 002's update and `docs/DEPLOYMENT.md` §7.
 
 ## 10. Trade-offs (summary)
 

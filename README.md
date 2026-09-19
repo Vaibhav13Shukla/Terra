@@ -167,16 +167,20 @@ No secrets are committed — verified with a repo-wide scan for AWS access
 keys, private key headers, and inline credentials (clean); `.gitignore`
 excludes `.env`, keys, and credential files, and none are tracked (verified
 via `git ls-files`). Deployed infrastructure uses IAM roles scoped to Terra's
-own DynamoDB table, its own S3 bucket, and `bedrock:InvokeModel` only —
-never `AdministratorAccess`. AWS credentials are never exposed to the
-frontend.
+own DynamoDB table, its own S3 bucket, its own SQS queue, and
+`bedrock:InvokeModel` only — never `AdministratorAccess`. AWS credentials are
+never exposed to the frontend. End-user auth is Amazon Cognito
+(`app/auth/`), JWT-verified against the pool's public JWKS, off by default
+and enabled with `AUTH_ENABLED=true` once the frontend's login flow is ready
+(`docs/DEPLOYMENT.md`).
 
 ## Deployment status
 
 The AWS infrastructure is defined as code in [`infra/`](infra/) (AWS SAM;
-YAML-validated). **Deploy is pending the team's AWS credentials** — not yet
-applied from this environment. Deploy steps are documented exactly in
-[`infra/README.md`](infra/README.md). The full application pipeline (not the
+`cfn-lint`-clean, checked on every push by CI). **Deploy is pending the
+team's AWS credentials** — not yet applied from this environment. Full
+step-by-step deploy instructions: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md);
+quick reference: [`infra/README.md`](infra/README.md). The full application pipeline (not the
 infrastructure — the actual discover→NDVI→evidence logic) has been verified
 end-to-end against **live** Sentinel-2 data through the real running API
 server, independent of any AWS deployment.

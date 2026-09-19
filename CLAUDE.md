@@ -33,8 +33,14 @@ The frontend is built separately by the team.
 - `backend/app/providers/` — `DataProvider` base + `sentinel2` (Earth Search) +
   `fixtures` (deterministic). Registry keyed by name; engine is provider-agnostic.
 - `backend/app/agents/` — deterministic intent parser + optional Bedrock adapter.
+- `backend/app/auth/` — Cognito JWT verification + the FastAPI auth dependency.
+  Off by default (`AUTH_ENABLED=false`); see `app/auth/dependencies.py`.
+- `backend/app/services/analysis_queue.py`, `backend/app/worker/` — optional
+  async processing (`TERRA_PROCESSING_MODE=async`): SQS enqueue + a worker
+  Lambda that runs the same pipeline as the synchronous API path.
 - `backend/app/api/` — FastAPI app (`/v1/analyses`, `/health`), Lambda via Mangum.
-- `infra/` — SAM template (container-image worker Lambda).
+- `infra/` — SAM template (API + worker Lambda, Cognito, SQS+DLQ).
+- `docs/DEPLOYMENT.md` — step-by-step AWS deployment runbook.
 - `evaluation/` — deterministic scenarios.
 
 ## Commands
