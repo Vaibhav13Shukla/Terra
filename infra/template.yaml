@@ -19,6 +19,36 @@ Parameters:
   BedrockModelId:
     Type: String
     Default: anthropic.claude-3-5-haiku-20241022-v1:0
+  AuthEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Require a valid Cognito token on the analyses endpoints. The User Pool
+      is always created (so it's ready to wire into the frontend); this
+      toggles whether the API actually enforces it, so infra can be deployed
+      before the frontend's login flow is finished (§61 — never block on
+      auth to demo the core pipeline).
+  FrontendOrigin:
+    Type: String
+    Default: "*"
+    Description: >-
+      Deployed frontend origin for CORS, e.g. https://app.example.com.
+      Defaults to "*" for early development; set this to the real origin
+      before sharing the API publicly (§31).
+  ProcessingMode:
+    Type: String
+    Default: sync
+    AllowedValues: [sync, async]
+    Description: >-
+      'sync' (default): the API runs the analysis inline and returns the
+      completed result in one request — simplest to demo, and fast enough
+      for the hackathon's small-AOI workload (see docs/adr/002). 'async':
+      the API enqueues to SQS and returns immediately; WorkerFunction
+      processes the queue and resolves the job, same as a production-scale
+      deployment would. The queue and worker are always deployed either way
+      so switching modes is a parameter change, not a redeploy of new
+      resources.
 
 Globals:
   Function:
@@ -32,6 +62,13 @@ Globals:
         AWS_REGION_NAME: !Ref AWS::Region
         BEDROCK_ENABLED: !Ref BedrockEnabled
         BEDROCK_MODEL_ID: !Ref BedrockModelId
+        AUTH_ENABLED: !Ref AuthEnabled
+        COGNITO_USER_POOL_ID: !Ref TerraUserPool
+        COGNITO_APP_CLIENT_ID: !Ref TerraUserPoolClient
+        COGNITO_REGION: !Ref AWS::Region
+        CORS_ALLOW_ORIGINS: !Ref FrontendOrigin
+        TERRA_PROCESSING_MODE: !Ref ProcessingMode
+        ANALYSES_QUEUE_URL: !Ref AnalysesQueue
 
 Resources:
   # ------------------------------------------------------------------ #
@@ -42,9 +79,9 @@ Resources:
     Properties:
       StageName: !Ref Stage
       CorsConfiguration:
-        AllowOrigins: ["*"]   # tighten to the deployed frontend origin once known (§31)
+        AllowOrigins: [!Ref FrontendOrigin]
         AllowMethods: ["GET", "POST"]
-        AllowHeaders: ["*"]
+        AllowHeaders: ["*", "Authorization"]
       # Basic abuse/cost protection (§45, §67) -- a public, unauthenticated
       # API needs a request ceiling even at hackathon scale. Deliberately
       # modest: raise if legitimate demo/judging traffic gets throttled.
@@ -72,6 +109,8 @@ Resources:
             TableName: !Ref AnalysesTable
         - S3CrudPolicy:
             BucketName: !Ref ResultsBucket
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AnalysesQueue.QueueName
         - Statement:
             # Least privilege (§31, §91): only the Bedrock actions Terra
             # actually calls, only when Bedrock is enabled at all. No
@@ -81,6 +120,101 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+
+  # ------------------------------------------------------------------ #
+  # Async processing (ProcessingMode=async — see app.worker.handler)
+  # ------------------------------------------------------------------ #
+  AnalysesDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub terra-analyses-dlq-${Stage}
+      MessageRetentionPeriod: 1209600   # 14 days (max) — time to investigate a poison message
+
+  AnalysesQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub terra-analyses-${Stage}
+      VisibilityTimeout: 120   # >= WorkerFunction's own timeout, so SQS won't redeliver mid-processing
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AnalysesDLQ.Arn
+        maxReceiveCount: 3   # a request that fails 3x is a real failure, not a transient blip
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub terra-worker-${Stage}
+      PackageType: Image
+      ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/terra-api:latest"
+      # Same image as ApiFunction (same app code/dependencies) — only the
+      # invoked entry point differs, via ImageConfig.Command overriding the
+      # Dockerfile's default CMD. One image to build and push, not two.
+      ImageConfig:
+        Command: ["app.worker.handler.handler"]
+      Events:
+        AnalysesQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AnalysesQueue.Arn
+            BatchSize: 1   # one analysis per invocation keeps failure isolation simple (§53)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalysesTable
+        - S3CrudPolicy:
+            BucketName: !Ref ResultsBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+
+  WorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/terra-worker-${Stage}
+      RetentionInDays: 30
+
+  # ------------------------------------------------------------------ #
+  # Auth
+  # ------------------------------------------------------------------ #
+  TerraUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub terra-users-${Stage}
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+
+  TerraUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub terra-web-${Stage}
+      UserPoolId: !Ref TerraUserPool
+      GenerateSecret: false   # public SPA client (frontend), never store a secret in browser JS
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
 
   # ------------------------------------------------------------------ #
   # State
@@ -136,3 +270,12 @@ Outputs:
     Value: !Ref ResultsBucket
   AnalysesTableName:
     Value: !Ref AnalysesTable
+  CognitoUserPoolId:
+    Description: Cognito User Pool id — the frontend's auth SDK (e.g. Amplify) needs this
+    Value: !Ref TerraUserPool
+  CognitoAppClientId:
+    Description: Cognito App Client id — the frontend's auth SDK needs this
+    Value: !Ref TerraUserPoolClient
+  AnalysesQueueUrl:
+    Description: SQS queue URL used when ProcessingMode=async
+    Value: !Ref AnalysesQueue
