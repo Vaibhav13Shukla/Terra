@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 
 import rasterio
+import requests.exceptions
 from pystac_client import Client
 from rasterio.enums import Resampling
 from rasterio.warp import transform_bounds
@@ -25,6 +26,7 @@ from rasterio.windows import from_bounds
 
 from app.domain.models import AOI, DataAsset, DateRange, Scene
 from app.providers.base import BandWindow, DataProvider
+from app.services.retry import retry_with_backoff
 
 EARTH_SEARCH_URL = "https://earth-search.aws.element84.com/v1"
 COLLECTION = "sentinel-2-l2a"
@@ -41,14 +43,31 @@ _DEFAULT_OFFSET = -0.1
 # and this cap. Not the same as the user's threshold — see search().
 SEARCH_CLOUD_COVER_CAP = 80.0
 
-# GDAL tuning for efficient anonymous remote COG access.
+# GDAL tuning for efficient anonymous remote COG access. GDAL_HTTP_MAX_RETRY
+# / GDAL_HTTP_RETRY_DELAY give windowed COG reads their own bounded,
+# exponential-backoff retry on transient HTTP failures (§28) — this is GDAL's
+# native VSI curl layer, not app.services.retry, since it correctly handles
+# partial range-request resume; reimplementing that ourselves would be worse.
 _GDAL_ENV = {
     "AWS_NO_SIGN_REQUEST": "YES",
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "VSI_CACHE": "TRUE",
     "GDAL_HTTP_MULTIPLEX": "YES",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif",
+    "GDAL_HTTP_MAX_RETRY": "3",
+    "GDAL_HTTP_RETRY_DELAY": "1",
 }
+
+# STAC search over HTTP has no comparable built-in retry, so it goes through
+# app.services.retry explicitly. Only genuinely transient failure modes are
+# retried — never a malformed request (§28). Note: requests.exceptions.
+# ConnectionError/Timeout are NOT subclasses of the built-in ConnectionError/
+# TimeoutError (verified) — using the built-ins here would silently retry on
+# nothing, since pystac_client's search() raises the requests variants.
+_STAC_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+)
 
 
 class Sentinel2Provider(DataProvider):
@@ -85,8 +104,13 @@ class Sentinel2Provider(DataProvider):
             query={"eo:cloud_cover": {"lt": search_cap}},
             max_items=limit,
         )
+        # The actual HTTP request(s) happen lazily during iteration/pagination
+        # (search.items()), not at .search() itself — retry that call (§28).
+        items = retry_with_backoff(
+            lambda: list(search.items()), exceptions=_STAC_RETRYABLE_EXCEPTIONS
+        )
         scenes: list[Scene] = []
-        for item in search.items():
+        for item in items:
             assets: dict[str, DataAsset] = {}
             for key in self.supported_bands:
                 asset = item.assets.get(key)
