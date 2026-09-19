@@ -56,10 +56,25 @@ class DataProvider(abc.ABC):
         supports it, but the authoritative quality filter runs downstream."""
 
     @abc.abstractmethod
-    def read_window(self, scene: Scene, band_key: str, aoi: AOI) -> BandWindow:
+    def read_window(
+        self,
+        scene: Scene,
+        band_key: str,
+        aoi: AOI,
+        out_shape: tuple[int, int] | None = None,
+    ) -> BandWindow:
         """Windowed read of ``band_key`` for ``scene`` clipped to ``aoi``.
 
-        Must read only the AOI window, never the whole scene (§18)."""
+        Must read only the AOI window, never the whole scene (§18).
+
+        ``out_shape``, when given, requests the array be returned at that
+        exact (rows, cols) shape via nearest-neighbor resampling — used to
+        align a lower-resolution band (e.g. Sentinel-2's 20 m SCL) onto a
+        higher-resolution band's grid (e.g. 10 m red/nir) so they can be
+        combined pixel-for-pixel. Nearest-neighbor is mandatory for
+        categorical data (never interpolate class codes); providers should use
+        it unconditionally here since this method has no way to know whether
+        ``band_key`` is categorical or continuous."""
 
 
 class ProviderRegistry:

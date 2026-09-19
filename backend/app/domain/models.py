@@ -123,12 +123,23 @@ class DateRange(BaseModel):
 
 
 class DataAsset(BaseModel):
-    """A single retrievable band/asset within a scene."""
+    """A single retrievable band/asset within a scene.
+
+    ``scale``/``offset`` are the reflectance conversion factors for this asset,
+    when the provider can supply them (e.g. from STAC ``raster:bands``
+    metadata). They are NOT reliably present in the COG's own GDAL band tags —
+    see :mod:`app.providers.sentinel2` — so providers should populate them from
+    catalog metadata during ``search()`` rather than inferring them at read
+    time. ``None`` means "unknown"; the reader falls back to documented
+    provider defaults.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     key: str = Field(..., description="Logical band key, e.g. 'red', 'nir', 'scl'")
     href: str = Field(..., description="COG URL (https:// or s3://)")
+    scale: float | None = Field(default=None, description="Reflectance scale factor")
+    offset: float | None = Field(default=None, description="Reflectance additive offset")
 
 
 class Scene(BaseModel):

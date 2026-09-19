@@ -114,7 +114,13 @@ def _period_ndvi_mean(
 
         valid_mask = None
         if "scl" in scene.assets:
-            scl_win = provider.read_window(scene, "scl", request.aoi)
+            # SCL is natively lower-resolution than red/nir for Sentinel-2
+            # (20 m vs 10 m) — request it aligned to the red/nir grid so it
+            # can be used as a pixel-for-pixel mask (§17; verified against a
+            # live scene during development, see docs/adr).
+            scl_win = provider.read_window(
+                scene, "scl", request.aoi, out_shape=red.shape
+            )
             valid_mask = scl_valid_mask(scl_win.array)
 
         field = compute_ndvi(red, nir, valid_mask=valid_mask)

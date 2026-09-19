@@ -2,10 +2,16 @@
 public ``sentinel-cogs`` bucket on AWS (§7.3, §13).
 
 Real, production-capable adapter:
-* discovery via STAC search (cloud pre-filter server-side)
+* discovery via STAC search (generous server-side cloud pre-filter)
 * windowed COG reads (only the AOI window, §18)
-* reflectance scale/offset read from each asset's ``raster:bands`` metadata,
+* reflectance scale/offset read from STAC ``raster:bands`` metadata at search
+  time (NOT from the COG's own GDAL band tags — verified empirically against a
+  live scene that those tags report the uninformative default (1.0, 0.0) even
+  though the STAC item's ``raster:bands`` carries the real (0.0001, -0.1)),
   with documented Sentinel-2 L2A defaults as a fallback (§20)
+* SCL (20 m) is resampled to the red/nir (10 m) grid on read via nearest-
+  neighbor — verified empirically that SCL and red/nir windows otherwise come
+  back at different shapes and cannot be combined for masking (§17)
 """
 from __future__ import annotations
 
@@ -13,6 +19,7 @@ import os
 
 import rasterio
 from pystac_client import Client
+from rasterio.enums import Resampling
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
 
@@ -24,7 +31,7 @@ COLLECTION = "sentinel-2-l2a"
 
 # Sentinel-2 L2A processing baseline >= 04.00 (since 2022-01-25) applies a
 # BOA_ADD_OFFSET of -1000 to reflectance DN. reflectance = (DN - 1000) * 1e-4
-# = DN*1e-4 - 0.1. Used only when a scene omits raster:bands metadata.
+# = DN*1e-4 - 0.1. Used only when a scene's STAC item omits raster:bands.
 _DEFAULT_SCALE = 0.0001
 _DEFAULT_OFFSET = -0.1
 
@@ -82,8 +89,13 @@ class Sentinel2Provider(DataProvider):
         for item in search.items():
             assets: dict[str, DataAsset] = {}
             for key in self.supported_bands:
-                if key in item.assets:
-                    assets[key] = DataAsset(key=key, href=item.assets[key].href)
+                asset = item.assets.get(key)
+                if asset is None:
+                    continue
+                scale, offset = self._raster_bands_scale_offset(asset.extra_fields)
+                assets[key] = DataAsset(
+                    key=key, href=asset.href, scale=scale, offset=offset
+                )
             scenes.append(
                 Scene(
                     id=item.id,
@@ -96,30 +108,62 @@ class Sentinel2Provider(DataProvider):
         return scenes
 
     @staticmethod
-    def _scale_offset(src: rasterio.DatasetReader) -> tuple[float, float]:
-        """Read reflectance scale/offset from the COG tags, else S2 L2A defaults."""
-        scales = src.scales
-        offsets = src.offsets
-        scale = scales[0] if scales and scales[0] not in (0, None) else _DEFAULT_SCALE
-        offset = offsets[0] if offsets else _DEFAULT_OFFSET
-        return float(scale), float(offset)
+    def _raster_bands_scale_offset(
+        extra_fields: dict,
+    ) -> tuple[float | None, float | None]:
+        """Extract (scale, offset) from a STAC asset's ``raster:bands`` field.
 
-    def read_window(self, scene: Scene, band_key: str, aoi: AOI) -> BandWindow:
+        Returns (None, None) when the field is absent so the caller can apply
+        documented defaults instead of a silently wrong identity transform."""
+        bands = extra_fields.get("raster:bands")
+        if not bands:
+            return None, None
+        first = bands[0]
+        scale = first.get("scale")
+        offset = first.get("offset")
+        return (
+            float(scale) if scale is not None else None,
+            float(offset) if offset is not None else None,
+        )
+
+    def read_window(
+        self,
+        scene: Scene,
+        band_key: str,
+        aoi: AOI,
+        out_shape: tuple[int, int] | None = None,
+    ) -> BandWindow:
         if band_key not in scene.assets:
             raise KeyError(f"scene {scene.id} has no asset '{band_key}'")
-        href = scene.assets[band_key].href
+        asset = scene.assets[band_key]
         with rasterio.Env(**_GDAL_ENV):
-            with rasterio.open(href) as src:
+            with rasterio.open(asset.href) as src:
                 left, bottom, right, top = transform_bounds(
                     "EPSG:4326", src.crs, *aoi.bbox()
                 )
                 window = from_bounds(left, bottom, right, top, src.transform)
-                arr = src.read(1, window=window)
-                scale, offset = self._scale_offset(src)
-                # SCL is a classification raster: it has no meaningful reflectance
-                # scaling, so report identity scale/offset for it.
+                if out_shape is not None:
+                    # Categorical (SCL) or continuous data being aligned to a
+                    # different band's grid: nearest-neighbor never invents an
+                    # intermediate class code or reflectance value (§17).
+                    arr = src.read(
+                        1,
+                        window=window,
+                        out_shape=out_shape,
+                        resampling=Resampling.nearest,
+                    )
+                else:
+                    arr = src.read(1, window=window)
+
                 if band_key == "scl":
+                    # SCL is a classification raster: reflectance scaling is
+                    # meaningless for it.
                     scale, offset = 1.0, 0.0
+                elif asset.scale is not None and asset.offset is not None:
+                    scale, offset = asset.scale, asset.offset
+                else:
+                    scale, offset = _DEFAULT_SCALE, _DEFAULT_OFFSET
+
                 return BandWindow(
                     array=arr,
                     scale=scale,

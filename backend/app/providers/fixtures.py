@@ -22,6 +22,15 @@ from app.providers.base import BandWindow, DataProvider
 _SCL_VEG = 4
 
 
+def _nearest_resize(arr: np.ndarray, out_shape: tuple[int, int]) -> np.ndarray:
+    """Nearest-neighbor resize, mirroring the real Sentinel2Provider's SCL
+    alignment behaviour (§17) for fixture scenes that don't already share a
+    common grid across bands."""
+    rows = (np.arange(out_shape[0]) * arr.shape[0] / out_shape[0]).astype(int)
+    cols = (np.arange(out_shape[1]) * arr.shape[1] / out_shape[1]).astype(int)
+    return arr[np.ix_(rows, cols)]
+
+
 @dataclass
 class FixtureScene:
     """A synthetic scene with in-memory band arrays (reflectance, 0..1)."""
@@ -86,13 +95,21 @@ class FixturesProvider(DataProvider):
                 break
         return out
 
-    def read_window(self, scene: Scene, band_key: str, aoi: AOI) -> BandWindow:
+    def read_window(
+        self,
+        scene: Scene,
+        band_key: str,
+        aoi: AOI,
+        out_shape: tuple[int, int] | None = None,
+    ) -> BandWindow:
         fx = self._scenes.get(scene.id)
         if fx is None:
             raise KeyError(f"unknown fixture scene '{scene.id}'")
         band = {"red": fx.red, "nir": fx.nir, "scl": fx.scl}.get(band_key)
         if band is None:
             raise KeyError(f"fixture scene '{scene.id}' has no band '{band_key}'")
+        if out_shape is not None and tuple(out_shape) != band.shape:
+            band = _nearest_resize(band, out_shape)
         return BandWindow(
             array=band,
             scale=1.0,
