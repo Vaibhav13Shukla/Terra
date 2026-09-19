@@ -4,6 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Navbar } from "@/components/Navbar";
 import { ScrollReveal } from "@/components/ScrollReveal";
+import { entryHref } from "@/lib/auth";
 
 const Globe3D = dynamic(
   () => import("@/components/Globe3D").then((m) => m.Globe3D),
@@ -83,7 +84,7 @@ export default function LandingPage() {
           </p>
           <div className="mt-10 flex items-center justify-center gap-4">
             <Link
-              href="/signup"
+              href={entryHref()}
               className="spectral-glow rounded-[var(--radius-sm)] border border-text-primary bg-text-primary px-6 py-3 text-sm font-medium text-canvas transition hover:opacity-90"
             >
               Launch Terra
@@ -185,7 +186,7 @@ export default function LandingPage() {
             Ready to ask Earth a question?
           </h2>
           <Link
-            href="/signup"
+            href={entryHref()}
             className="spectral-glow mt-8 inline-block rounded-[var(--radius-sm)] border border-text-primary bg-text-primary px-6 py-3 text-sm font-medium text-canvas transition hover:opacity-90"
           >
             Launch Terra

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { useAuthStore } from "@/lib/store";
+import { isAuthConfigured } from "@/lib/auth";
 
 export function Navbar() {
   const { authenticated, email, hydrate, logout } = useAuthStore();
@@ -20,7 +21,14 @@ export function Navbar() {
         </span>
       </Link>
       <div className="flex items-center gap-3">
-        {authenticated ? (
+        {!isAuthConfigured() ? (
+          <Link
+            href="/workspace"
+            className="rounded-[var(--radius-sm)] border border-text-primary px-4 py-2 text-sm font-medium text-text-primary transition hover:bg-text-primary hover:text-canvas"
+          >
+            Open workspace
+          </Link>
+        ) : authenticated ? (
           <>
             <Link
               href="/workspace"

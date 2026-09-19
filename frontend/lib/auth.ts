@@ -10,6 +10,26 @@ const ID_TOKEN_KEY = "terra_id_token";
 const REFRESH_TOKEN_KEY = "terra_refresh_token";
 const EMAIL_KEY = "terra_email";
 
+/**
+ * True only when both Cognito env vars are present. Everything user-facing
+ * that would otherwise dead-end on a missing pool (the landing CTAs, the
+ * workspace's login redirect) checks this first, so a deployment without
+ * Cognito configured — local dev, or a backend still on AUTH_ENABLED=false —
+ * runs the workspace in open demo mode instead of trapping visitors on a
+ * sign-in screen that can never succeed.
+ */
+export function isAuthConfigured(): boolean {
+  return Boolean(
+    process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID &&
+      process.env.NEXT_PUBLIC_COGNITO_APP_CLIENT_ID
+  );
+}
+
+/** Where a "Launch / Get started" call-to-action should send a visitor. */
+export function entryHref(): string {
+  return isAuthConfigured() ? "/signup" : "/workspace";
+}
+
 function getPool(): CognitoUserPool {
   const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
   const clientId = process.env.NEXT_PUBLIC_COGNITO_APP_CLIENT_ID;
