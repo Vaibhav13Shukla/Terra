@@ -19,6 +19,16 @@ from app.domain.models import AOI, Scene
 
 REQUIRED_BANDS = ("red", "nir", "scl")
 
+# Cap on scenes actually read per period. Measured against live Sentinel-2
+# data: ~4-6s per scene for red+nir+scl windowed reads (network + GDAL
+# overhead per asset). An AOI with abundant low-cloud coverage can return 20
+# candidate scenes per period; reading all of them serially took >120s and
+# was the direct cause of a request timeout during development (see
+# docs/adr/002-processing-runtime.md). Capping to the least-cloudy N keeps
+# worst-case latency bounded and avoids downloading data with no
+# statistical benefit to a simple mean (§18, §67 — cost discipline).
+MAX_SCENES_PER_PERIOD = 4
+
 
 @dataclass(frozen=True)
 class FilterOutcome:
@@ -67,6 +77,38 @@ def filter_scenes(
             )
 
     return FilterOutcome(selected=selected, rejected=rejected)
+
+
+def cap_scenes(
+    outcome: FilterOutcome, max_scenes: int = MAX_SCENES_PER_PERIOD
+) -> FilterOutcome:
+    """Cap ``outcome.selected`` to the ``max_scenes`` least-cloudy scenes.
+
+    Scenes beyond the cap move to ``rejected`` with an explicit reason, so
+    they remain visible in the evidence panel (§7.4) rather than silently
+    vanishing. A no-op when ``selected`` is already at or under the cap.
+    Scenes with unknown cloud_cover never reach here (they're already
+    rejected by :func:`filter_scenes`), so sorting is well-defined.
+    """
+    if len(outcome.selected) <= max_scenes:
+        return outcome
+
+    ranked = sorted(outcome.selected, key=lambda s: s.cloud_cover)  # type: ignore[arg-type]
+    kept, overflow = ranked[:max_scenes], ranked[max_scenes:]
+
+    capped_overflow = [
+        s.model_copy(
+            update={
+                "selected": False,
+                "rejection_reason": (
+                    f"more than {max_scenes} usable scenes were available; "
+                    f"used the {max_scenes} with lowest cloud cover"
+                ),
+            }
+        )
+        for s in overflow
+    ]
+    return FilterOutcome(selected=kept, rejected=outcome.rejected + capped_overflow)
 
 
 def _rejection_reason(

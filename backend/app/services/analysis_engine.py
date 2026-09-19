@@ -13,10 +13,12 @@ human-readable message (§27, §60) rather than guessing.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
 from app.domain.models import (
+    AOI,
     AnalysisRequest,
     AnalysisResult,
     AnalysisType,
@@ -35,9 +37,37 @@ from app.processing.ndvi import (
 )
 from app.providers.base import DataProvider
 from app.services.geometry import InvalidGeometryError, validate_aoi
-from app.services.quality_filter import filter_scenes
+from app.services.quality_filter import MAX_SCENES_PER_PERIOD, cap_scenes, filter_scenes
 
 NDVI_FORMULA = "NDVI = (NIR - RED) / (NIR + RED)"
+
+
+def _read_scene_ndvi(
+    provider: DataProvider, scene: Scene, aoi: AOI
+) -> tuple[float | None, float | None]:
+    """Read one scene's bands and compute its NDVI mean/valid-ratio.
+
+    Isolated as its own function so it can run in a worker thread — see
+    :func:`_period_ndvi_mean`. Returns (None, None) if the scene yields no
+    valid pixels (e.g. entirely masked by cloud/nodata within the AOI)."""
+    red_win = provider.read_window(scene, "red", aoi)
+    nir_win = provider.read_window(scene, "nir", aoi)
+    red = apply_reflectance(red_win.array, red_win.scale, red_win.offset)
+    nir = apply_reflectance(nir_win.array, nir_win.scale, nir_win.offset)
+
+    valid_mask = None
+    if "scl" in scene.assets:
+        # SCL is natively lower-resolution than red/nir for Sentinel-2
+        # (20 m vs 10 m) — request it aligned to the red/nir grid so it can
+        # be used as a pixel-for-pixel mask (§17; verified against a live
+        # scene during development, see docs/adr).
+        scl_win = provider.read_window(scene, "scl", aoi, out_shape=red.shape)
+        valid_mask = scl_valid_mask(scl_win.array)
+
+    field = compute_ndvi(red, nir, valid_mask=valid_mask)
+    if field.stats.valid_pixels == 0:
+        return None, None
+    return field.stats.mean, field.stats.valid_ratio
 
 
 class AnalysisError(Exception):
@@ -92,41 +122,38 @@ def _period_ndvi_mean(
     )
 
     outcome = filter_scenes(candidates, request.aoi, request.cloud_threshold)
+    outcome = cap_scenes(outcome)
     steps.append(
         ProcessingStep(
             name=f"filter:{label}",
             detail=f"selected {outcome.scenes_used}, rejected {outcome.scenes_rejected} "
-            f"(cloud_threshold={request.cloud_threshold}%)",
+            f"(cloud_threshold={request.cloud_threshold}%, "
+            f"max {MAX_SCENES_PER_PERIOD} scenes/period read)",
         )
     )
 
     if not outcome.selected:
         return None, outcome.selected, outcome.rejected, None
 
-    ndvi_means: list[float] = []
-    valid_ratios: list[float] = []
+    # Scenes are independent, I/O-bound (network) reads — read them
+    # concurrently rather than one at a time. Measured against live
+    # Sentinel-2 data: a serial read of a capped 4-scene period took ~60s
+    # (network + GDAL overhead per asset dominates, not CPU), which risks
+    # exceeding API Gateway's 29s integration timeout even with the scene cap
+    # in place (see docs/adr/002-processing-runtime.md). Each worker thread
+    # opens its own rasterio dataset handle (inside read_window), so this is
+    # safe — no shared mutable GDAL/rasterio state across threads.
     t0 = time.perf_counter()
-    for scene in outcome.selected:
-        red_win = provider.read_window(scene, "red", request.aoi)
-        nir_win = provider.read_window(scene, "nir", request.aoi)
-        red = apply_reflectance(red_win.array, red_win.scale, red_win.offset)
-        nir = apply_reflectance(nir_win.array, nir_win.scale, nir_win.offset)
-
-        valid_mask = None
-        if "scl" in scene.assets:
-            # SCL is natively lower-resolution than red/nir for Sentinel-2
-            # (20 m vs 10 m) — request it aligned to the red/nir grid so it
-            # can be used as a pixel-for-pixel mask (§17; verified against a
-            # live scene during development, see docs/adr).
-            scl_win = provider.read_window(
-                scene, "scl", request.aoi, out_shape=red.shape
+    max_workers = min(len(outcome.selected), MAX_SCENES_PER_PERIOD)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        per_scene = list(
+            pool.map(
+                lambda scene: _read_scene_ndvi(provider, scene, request.aoi),
+                outcome.selected,
             )
-            valid_mask = scl_valid_mask(scl_win.array)
-
-        field = compute_ndvi(red, nir, valid_mask=valid_mask)
-        if field.stats.valid_pixels > 0:
-            ndvi_means.append(field.stats.mean)
-            valid_ratios.append(field.stats.valid_ratio)
+        )
+    ndvi_means = [mean for mean, _ in per_scene if mean is not None]
+    valid_ratios = [ratio for mean, ratio in per_scene if mean is not None]
 
     steps.append(
         ProcessingStep(
