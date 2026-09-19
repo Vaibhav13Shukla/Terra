@@ -6,20 +6,38 @@ components).
 """
 from __future__ import annotations
 
+from app.config.settings import get_settings
 from app.providers.base import DataProvider, ProviderRegistry
 from app.providers.fixtures import demo_decline_provider
 from app.providers.sentinel2 import Sentinel2Provider
 from app.services.job_store import InMemoryJobStore, JobStore
 
-_job_store: JobStore = InMemoryJobStore()
+_job_store: JobStore | None = None
 
 
 def get_job_store() -> JobStore:
     """Return the process-wide job store.
 
-    Always in-memory today (§61 — zero AWS setup required to run Terra
-    locally). A DynamoDB-backed store can be swapped in here behind the same
-    :class:`~app.services.job_store.JobStore` interface once deployed."""
+    Selected by ``Settings.terra_job_store``: ``"memory"`` (default — zero
+    AWS setup required to run Terra locally, §61) or ``"dynamodb"`` (deployed
+    — see :class:`~app.services.dynamodb_job_store.DynamoDBJobStore`, which
+    only imports `boto3` when actually constructed here, never at module
+    import time)."""
+    global _job_store
+    if _job_store is None:
+        settings = get_settings()
+        if settings.terra_job_store == "dynamodb":
+            from app.services.dynamodb_job_store import DynamoDBJobStore
+
+            if not settings.dynamodb_table:
+                raise RuntimeError(
+                    "TERRA_JOB_STORE=dynamodb requires DYNAMODB_TABLE to be set"
+                )
+            _job_store = DynamoDBJobStore.from_table_name(
+                settings.dynamodb_table, settings.aws_region
+            )
+        else:
+            _job_store = InMemoryJobStore()
     return _job_store
 
 

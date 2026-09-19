@@ -32,7 +32,7 @@ User (AOI + dates + question)
         |
         +--> explanation (deterministic by default; optional Bedrock)
         v
-   Job Store  (in-memory locally; DynamoDB interface-compatible when deployed)
+   Job Store  (InMemoryJobStore locally; DynamoDBJobStore when TERRA_JOB_STORE=dynamodb)
         |
         v
    API response  /  GET /v1/analyses/{id}  /  GET /v1/analyses/{id}/evidence

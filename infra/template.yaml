@@ -45,6 +45,12 @@ Resources:
         AllowOrigins: ["*"]   # tighten to the deployed frontend origin once known (§31)
         AllowMethods: ["GET", "POST"]
         AllowHeaders: ["*"]
+      # Basic abuse/cost protection (§45, §67) -- a public, unauthenticated
+      # API needs a request ceiling even at hackathon scale. Deliberately
+      # modest: raise if legitimate demo/judging traffic gets throttled.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
 
   ApiFunction:
     Type: AWS::Serverless::Function
