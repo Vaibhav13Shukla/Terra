@@ -1,0 +1,51 @@
+# Terra — working notes for Claude Code
+
+**Terra** = "Earth Observation, without the plumbing." Turns a natural-language
+geospatial question into a reproducible, evidence-backed satellite analysis.
+This repo is **backend + EO engine + AI orchestration + AWS infra + tests**.
+The frontend is built separately by the team.
+
+## Golden rules (do not break)
+
+1. **Deterministic science, LLM only for language.** The LLM (Bedrock) maps
+   question -> structured intent and explains results. It NEVER computes NDVI,
+   cloud cover, or any measurement. All numbers come from `app/processing` and
+   `app/services` in Python.
+2. **Scientific honesty.** Report "NDVI decreased X%", never "the field is X%
+   drier." Always surface data quality (scenes used/rejected, cloud, valid-pixel
+   ratio) and limitations.
+3. **Windowed reads only.** Read the AOI window of a COG, never a whole scene.
+4. **Works offline.** The default `pytest` run needs no network and no AWS
+   credentials. Bedrock and AWS adapters degrade gracefully (deterministic intent
+   parser; in-memory job store; fixtures provider).
+5. **No secrets in git.** `.env`, keys, credentials are git-ignored.
+
+## Layout
+
+- `backend/app/domain/models.py` — Pydantic contracts (AOI, DateRange, Scene,
+  AnalysisRequest/Result, Evidence, DataQuality, AnalysisJob). Cross-module data
+  is always one of these, never a bare dict.
+- `backend/app/processing/ndvi.py` — pure numpy NDVI + percentage change.
+- `backend/app/services/` — geometry, quality filter, analysis engine, job store.
+- `backend/app/providers/` — `DataProvider` base + `sentinel2` (Earth Search) +
+  `fixtures` (deterministic). Registry keyed by name; engine is provider-agnostic.
+- `backend/app/agents/` — deterministic intent parser + optional Bedrock adapter.
+- `backend/app/api/` — FastAPI app (`/v1/analyses`, `/health`), Lambda via Mangum.
+- `infra/` — SAM template (container-image worker Lambda).
+- `evaluation/` — deterministic scenarios.
+
+## Commands
+
+```bash
+cd backend
+../.venv/Scripts/python -m pytest              # all tests (offline, deterministic)
+../.venv/Scripts/python -m pytest -m network   # live STAC test (opt-in)
+../.venv/Scripts/python -m ruff check app tests
+../.venv/Scripts/python -m ruff format app tests
+```
+
+## Conventions
+
+- Python 3.11, type hints, ruff (E,F,I,UP,B,W). Conventional Commits
+  (`feat:`, `fix:`, `test:`, `docs:`, `chore:`). Push after each feature.
+- Add a new `AnalysisType` only with matching processing code AND tests.

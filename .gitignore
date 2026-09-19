@@ -1,0 +1,38 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Env / secrets  (NEVER commit real credentials)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+aws-credentials*
+.aws/
+
+# Node / frontend (template arrives later)
+node_modules/
+dist/
+.next/
+*.local
+
+# Build / deploy artifacts
+.aws-sam/
+samconfig.toml
+packaged.yaml
+
+# Local data / scratch
+*.tif
+*.tiff
+!evaluation/fixtures/**/*.tif
+results_local/
+spike_*.py

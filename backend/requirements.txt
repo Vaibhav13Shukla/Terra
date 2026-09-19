@@ -1,0 +1,17 @@
+# Terra backend runtime dependencies (Python 3.11+)
+# Core API
+fastapi>=0.110
+uvicorn>=0.29
+mangum>=0.17          # ASGI -> AWS Lambda adapter
+pydantic>=2.6
+pydantic-settings>=2.2
+httpx>=0.27
+
+# Geospatial / EO processing
+rasterio>=1.3         # windowed COG reads (bundles GDAL)
+pystac-client>=0.7    # STAC discovery (Earth Search)
+shapely>=2.0          # geometry validation
+numpy>=1.24
+
+# AWS SDK (used by cloud adapters; imported lazily so offline tests don't need it)
+boto3>=1.34
