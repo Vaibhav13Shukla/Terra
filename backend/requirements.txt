@@ -6,6 +6,7 @@ mangum>=0.17          # ASGI -> AWS Lambda adapter
 pydantic>=2.6
 pydantic-settings>=2.2
 httpx>=0.27
+python-jose[cryptography]>=3.3   # verifies Cognito JWTs against the pool's JWKS; pure crypto, no AWS SDK/creds needed
 
 # Geospatial / EO processing
 rasterio>=1.3         # windowed COG reads (bundles GDAL)
@@ -13,5 +14,11 @@ pystac-client>=0.7    # STAC discovery (Earth Search)
 shapely>=2.0          # geometry validation
 numpy>=1.24
 
-# AWS SDK (used by cloud adapters; imported lazily so offline tests don't need it)
-boto3>=1.34
+# AWS SDK: intentionally NOT listed here. Cloud adapters (DynamoDB job store,
+# SQS worker, Bedrock) import boto3 lazily, only when actually constructed
+# against a real AWS resource, so the default dev/test environment never
+# needs it (§61 — offline by design). The Lambda deploy container doesn't
+# need it declared either: the `public.ecr.aws/lambda/python` base image
+# ships boto3/botocore already. If you want to exercise the real AWS SDK
+# locally (e.g. against a local DynamoDB/SQS endpoint), install it yourself:
+# pip install boto3

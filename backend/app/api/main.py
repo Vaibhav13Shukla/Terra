@@ -18,27 +18,26 @@ the hackathon MVP. The job store/status model already matches an async
 design, so moving processing to a separate worker Lambda later needs no API
 contract change — see docs/adr/002-processing-runtime.md.
 """
+
 from __future__ import annotations
 
 import datetime as dt
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
-from app.agents.bedrock import BedrockUnavailableError, explain_result_bedrock
-from app.agents.explain import explain_result
 from app.agents.intent_parser import parse_intent
-from app.api.deps import bootstrap_providers, get_job_store, get_provider
+from app.api.deps import bootstrap_providers, get_analysis_queue, get_job_store, get_provider
 from app.api.schemas import CreateAnalysisRequest
+from app.auth.dependencies import CurrentUser
 from app.config.settings import Settings, get_settings
 from app.domain.models import (
     AOI,
     AnalysisJob,
     AnalysisRequest,
-    AnalysisResult,
     AnalysisType,
     DateRange,
     Evidence,
@@ -46,6 +45,7 @@ from app.domain.models import (
 from app.observability.logging import log_event, timed_event
 from app.providers.base import ProviderRegistry
 from app.services.analysis_engine import AnalysisError, run_analysis
+from app.services.explain_service import explain
 from app.services.geometry import InvalidGeometryError, validate_aoi
 from app.services.job_store import JobNotFoundError
 from app.services.quality_filter import filter_scenes
@@ -64,15 +64,40 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-# Permissive CORS for the hackathon: the API is read-mostly, carries no
-# cookies/session auth, and the frontend origin isn't fixed yet. Tighten to
-# the deployed frontend's exact origin once known (§31).
+
+def _cors_origins(settings: Settings) -> list[str]:
+    raw = settings.cors_allow_origins.strip()
+    if raw == "*":
+        return ["*"]
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+# CORS_ALLOW_ORIGINS defaults to "*" for local dev; a real deployment sets it
+# to the deployed frontend's exact origin(s) (§31, infra/template.yaml).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(get_settings()),
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization"],
 )
+
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    # HTTPS is terminated at API Gateway/CloudFront in every real deployment,
+    # so this is safe to always send, including in local http:// dev (the
+    # header is simply inert there).
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.update(_SECURITY_HEADERS)
+    return response
 
 
 @app.get("/health")
@@ -135,12 +160,12 @@ def list_scenes(
 
 
 @app.get("/v1/analyses")
-def list_analyses(limit: int = 20) -> list[AnalysisJob]:
+def list_analyses(user: CurrentUser, limit: int = 20) -> list[AnalysisJob]:
     return get_job_store().list_recent(limit=limit)
 
 
 @app.post("/v1/analyses", response_model=AnalysisJob)
-def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
+def create_analysis(payload: CreateAnalysisRequest, user: CurrentUser) -> AnalysisJob:
     settings = get_settings()
 
     analysis_type = payload.analysis
@@ -187,6 +212,18 @@ def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
     job_store = get_job_store()
     job = job_store.create(request)
 
+    if settings.terra_processing_mode == "async":
+        # Enqueue and return immediately; a separate worker Lambda (see
+        # app.worker.handler) runs the same pipeline and resolves the job to
+        # COMPLETED/FAILED. The job/status model is identical either way, so
+        # a poller (GET /v1/analyses/{id}) can't tell which mode produced it
+        # (§ADR 002 — moving to async needs no API contract change).
+        try:
+            get_analysis_queue().enqueue(job.job_id, request)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return job
+
     try:
         with timed_event(
             "analysis_completed",
@@ -219,25 +256,12 @@ def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
         scenes_rejected=result.data_quality.scenes_rejected if result.data_quality else None,
     )
 
-    result.explanation = _explain(result, settings)
+    result.explanation = explain(result, settings)
     return job_store.complete(job.job_id, result)
 
 
-def _explain(result: AnalysisResult, settings: Settings) -> str:
-    """Explain a result via Bedrock if enabled, else the deterministic
-    template explainer. Never lets a Bedrock failure break the request (§61)."""
-    if settings.bedrock_enabled:
-        try:
-            return explain_result_bedrock(
-                result, settings.bedrock_model_id, settings.aws_region
-            )
-        except BedrockUnavailableError:
-            pass  # fall through to deterministic explainer
-    return explain_result(result)
-
-
 @app.get("/v1/analyses/{job_id}", response_model=AnalysisJob)
-def get_analysis(job_id: str) -> AnalysisJob:
+def get_analysis(job_id: str, user: CurrentUser) -> AnalysisJob:
     try:
         return get_job_store().get(job_id)
     except JobNotFoundError as exc:
@@ -245,7 +269,7 @@ def get_analysis(job_id: str) -> AnalysisJob:
 
 
 @app.get("/v1/analyses/{job_id}/evidence", response_model=Evidence)
-def get_evidence(job_id: str) -> Evidence:
+def get_evidence(job_id: str, user: CurrentUser) -> Evidence:
     try:
         job = get_job_store().get(job_id)
     except JobNotFoundError as exc:

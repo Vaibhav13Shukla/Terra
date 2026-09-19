@@ -46,6 +46,13 @@ def test_health(client: TestClient):
     assert resp.json() == {"status": "ok"}
 
 
+def test_responses_carry_security_headers(client: TestClient):
+    resp = client.get("/health")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["referrer-policy"] == "no-referrer"
+
+
 def test_list_providers_includes_builtins(client: TestClient):
     resp = client.get("/v1/providers")
     assert resp.status_code == 200
