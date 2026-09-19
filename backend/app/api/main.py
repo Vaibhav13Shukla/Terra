@@ -2,6 +2,7 @@
 
     GET  /health
     GET  /v1/providers
+    GET  /v1/scenes
     POST /v1/analyses
     GET  /v1/analyses
     GET  /v1/analyses/{job_id}
@@ -34,6 +35,7 @@ from app.api.deps import bootstrap_providers, get_job_store, get_provider
 from app.api.schemas import CreateAnalysisRequest
 from app.config.settings import Settings, get_settings
 from app.domain.models import (
+    AOI,
     AnalysisJob,
     AnalysisRequest,
     AnalysisResult,
@@ -41,9 +43,12 @@ from app.domain.models import (
     DateRange,
     Evidence,
 )
+from app.observability.logging import log_event, timed_event
 from app.providers.base import ProviderRegistry
 from app.services.analysis_engine import AnalysisError, run_analysis
+from app.services.geometry import InvalidGeometryError, validate_aoi
 from app.services.job_store import JobNotFoundError
+from app.services.quality_filter import filter_scenes
 
 
 @asynccontextmanager
@@ -79,6 +84,54 @@ def health() -> dict:
 def list_providers() -> dict:
     bootstrap_providers()
     return {"providers": ProviderRegistry.names()}
+
+
+@app.get("/v1/scenes")
+def list_scenes(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    start_date: dt.date,
+    end_date: dt.date,
+    cloud_threshold: float = 20.0,
+    provider: str = "sentinel-2-l2a",
+) -> dict:
+    """Preview candidate satellite observations for a bbox/date range without
+    running a full analysis (§43, §9 — "show satellite observations"). A
+    lightweight bbox is used here (rather than the full AOI polygon
+    POST /v1/analyses accepts) since this is a browse/discovery endpoint, not
+    the pixel-level analysis itself."""
+    aoi = AOI(
+        coordinates=[
+            [
+                (min_lon, min_lat),
+                (max_lon, min_lat),
+                (max_lon, max_lat),
+                (min_lon, max_lat),
+                (min_lon, min_lat),
+            ]
+        ]
+    )
+    try:
+        validate_aoi(aoi)
+    except InvalidGeometryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        data_provider = get_provider(provider)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    date_range = DateRange(start=start_date, end=end_date)
+    candidates = data_provider.search(aoi, date_range, cloud_threshold=cloud_threshold)
+    outcome = filter_scenes(candidates, aoi, cloud_threshold)
+    return {
+        "selected": outcome.selected,
+        "rejected": outcome.rejected,
+        "scenes_used": outcome.scenes_used,
+        "scenes_rejected": outcome.scenes_rejected,
+    }
 
 
 @app.get("/v1/analyses")
@@ -135,10 +188,24 @@ def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
     job = job_store.create(request)
 
     try:
-        result = run_analysis(provider, request)
+        with timed_event(
+            "analysis_completed",
+            job_id=job.job_id,
+            analysis_type=analysis_type,
+            provider=payload.provider,
+        ):
+            result = run_analysis(provider, request)
     except AnalysisError as exc:
         job_store.fail(job.job_id, str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    log_event(
+        "analysis_result",
+        job_id=job.job_id,
+        status=result.status,
+        scenes_used=result.data_quality.scenes_used if result.data_quality else None,
+        scenes_rejected=result.data_quality.scenes_rejected if result.data_quality else None,
+    )
 
     result.explanation = _explain(result, settings)
     return job_store.complete(job.job_id, result)

@@ -52,6 +52,59 @@ def test_list_providers_includes_builtins(client: TestClient):
     assert "sentinel-2-l2a" in providers
 
 
+def test_list_scenes_against_fixtures_provider(client: TestClient):
+    resp = client.get(
+        "/v1/scenes",
+        params={
+            "min_lon": -120.60,
+            "min_lat": 36.95,
+            "max_lon": -120.55,
+            "max_lat": 37.00,
+            "start_date": "2025-08-01",
+            "end_date": "2025-08-31",
+            "cloud_threshold": 20,
+            "provider": "fixtures",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scenes_used"] == 2
+    assert body["scenes_rejected"] == 1
+    assert body["rejected"][0]["rejection_reason"] is not None
+
+
+def test_list_scenes_invalid_bbox_returns_400(client: TestClient):
+    resp = client.get(
+        "/v1/scenes",
+        params={
+            "min_lon": 0.0,
+            "min_lat": 0.0,
+            "max_lon": 2.0,
+            "max_lat": 2.0,
+            "start_date": "2025-08-01",
+            "end_date": "2025-08-31",
+            "provider": "fixtures",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_list_scenes_unknown_provider_returns_400(client: TestClient):
+    resp = client.get(
+        "/v1/scenes",
+        params={
+            "min_lon": -120.60,
+            "min_lat": 36.95,
+            "max_lon": -120.55,
+            "max_lat": 37.00,
+            "start_date": "2025-08-01",
+            "end_date": "2025-08-31",
+            "provider": "does-not-exist",
+        },
+    )
+    assert resp.status_code == 400
+
+
 def test_create_analysis_direct_structured_request(client: TestClient):
     body = {
         "aoi": _demo_aoi(),
