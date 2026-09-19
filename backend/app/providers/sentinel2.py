@@ -48,12 +48,17 @@ SEARCH_CLOUD_COVER_CAP = 80.0
 # exponential-backoff retry on transient HTTP failures (§28) — this is GDAL's
 # native VSI curl layer, not app.services.retry, since it correctly handles
 # partial range-request resume; reimplementing that ourselves would be worse.
+# GDAL_HTTP_TIMEOUT bounds each individual HTTP request — without it, a
+# stalled connection can block indefinitely, which would silently blow the
+# request past API Gateway's 29s integration timeout (see docs/adr/002)
+# regardless of how well-bounded everything else is.
 _GDAL_ENV = {
     "AWS_NO_SIGN_REQUEST": "YES",
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "VSI_CACHE": "TRUE",
     "GDAL_HTTP_MULTIPLEX": "YES",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif",
+    "GDAL_HTTP_TIMEOUT": "10",
     "GDAL_HTTP_MAX_RETRY": "3",
     "GDAL_HTTP_RETRY_DELAY": "1",
 }
