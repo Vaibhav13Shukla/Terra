@@ -1,0 +1,186 @@
+"""Terra API — FastAPI application (§43).
+
+    GET  /health
+    GET  /v1/providers
+    POST /v1/analyses
+    GET  /v1/analyses
+    GET  /v1/analyses/{job_id}
+    GET  /v1/analyses/{job_id}/evidence
+
+Deployed behind API Gateway via Mangum (see `handler` at the bottom) or run
+locally with uvicorn (see README "Local development").
+
+Trade-off (documented, §53): analyses run synchronously within the request —
+windowed COG reads for a small AOI complete in single-digit seconds (verified
+in the feasibility spike), so a true async worker queue is not required for
+the hackathon MVP. The job store/status model already matches an async
+design, so moving processing to a separate worker Lambda later needs no API
+contract change — see docs/adr/002-processing-runtime.md.
+"""
+from __future__ import annotations
+
+import datetime as dt
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
+
+from app.agents.bedrock import BedrockUnavailableError, explain_result_bedrock
+from app.agents.explain import explain_result
+from app.agents.intent_parser import parse_intent
+from app.api.deps import bootstrap_providers, get_job_store, get_provider
+from app.api.schemas import CreateAnalysisRequest
+from app.config.settings import Settings, get_settings
+from app.domain.models import (
+    AnalysisJob,
+    AnalysisRequest,
+    AnalysisResult,
+    AnalysisType,
+    DateRange,
+    Evidence,
+)
+from app.providers.base import ProviderRegistry
+from app.services.analysis_engine import AnalysisError, run_analysis
+from app.services.job_store import JobNotFoundError
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    bootstrap_providers()
+    yield
+
+
+app = FastAPI(
+    title="Terra API",
+    version="0.1.0",
+    description="Earth Observation, without the plumbing.",
+    lifespan=_lifespan,
+)
+
+# Permissive CORS for the hackathon: the API is read-mostly, carries no
+# cookies/session auth, and the frontend origin isn't fixed yet. Tighten to
+# the deployed frontend's exact origin once known (§31).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.get("/v1/providers")
+def list_providers() -> dict:
+    bootstrap_providers()
+    return {"providers": ProviderRegistry.names()}
+
+
+@app.get("/v1/analyses")
+def list_analyses(limit: int = 20) -> list[AnalysisJob]:
+    return get_job_store().list_recent(limit=limit)
+
+
+@app.post("/v1/analyses", response_model=AnalysisJob)
+def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
+    settings = get_settings()
+
+    analysis_type = payload.analysis
+    cloud_threshold = payload.cloud_threshold
+
+    if payload.question:
+        intent = parse_intent(payload.question, default_cloud_threshold=cloud_threshold)
+        if not intent.supported:
+            raise HTTPException(status_code=422, detail=intent.reason)
+        analysis_type = intent.analysis_type
+        cloud_threshold = intent.cloud_threshold
+
+    date_range = DateRange(start=payload.start_date, end=payload.end_date)
+    comparison_range = None
+    if analysis_type == AnalysisType.NDVI_CHANGE:
+        if payload.comparison_start_date and payload.comparison_end_date:
+            comparison_range = DateRange(
+                start=payload.comparison_start_date, end=payload.comparison_end_date
+            )
+        else:
+            # Default: an equal-length immediately-preceding period (§7.2).
+            span = payload.end_date - payload.start_date
+            comp_end = payload.start_date - dt.timedelta(days=1)
+            comp_start = comp_end - span
+            comparison_range = DateRange(start=comp_start, end=comp_end)
+
+    try:
+        request = AnalysisRequest(
+            aoi=payload.aoi,
+            analysis_type=analysis_type,
+            date_range=date_range,
+            comparison_range=comparison_range,
+            cloud_threshold=cloud_threshold,
+            provider=payload.provider,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        provider = get_provider(payload.provider)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    job_store = get_job_store()
+    job = job_store.create(request)
+
+    try:
+        result = run_analysis(provider, request)
+    except AnalysisError as exc:
+        job_store.fail(job.job_id, str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result.explanation = _explain(result, settings)
+    return job_store.complete(job.job_id, result)
+
+
+def _explain(result: AnalysisResult, settings: Settings) -> str:
+    """Explain a result via Bedrock if enabled, else the deterministic
+    template explainer. Never lets a Bedrock failure break the request (§61)."""
+    if settings.bedrock_enabled:
+        try:
+            return explain_result_bedrock(
+                result, settings.bedrock_model_id, settings.aws_region
+            )
+        except BedrockUnavailableError:
+            pass  # fall through to deterministic explainer
+    return explain_result(result)
+
+
+@app.get("/v1/analyses/{job_id}", response_model=AnalysisJob)
+def get_analysis(job_id: str) -> AnalysisJob:
+    try:
+        return get_job_store().get(job_id)
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"analysis '{job_id}' not found") from exc
+
+
+@app.get("/v1/analyses/{job_id}/evidence", response_model=Evidence)
+def get_evidence(job_id: str) -> Evidence:
+    try:
+        job = get_job_store().get(job_id)
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"analysis '{job_id}' not found") from exc
+    if job.result is None or job.result.evidence is None:
+        raise HTTPException(status_code=404, detail="no evidence available for this analysis")
+    return job.result.evidence
+
+
+# AWS Lambda entry point (API Gateway -> Lambda via Mangum). `mangum` is only
+# needed when actually deployed; guarded so local dev/tests never require it.
+try:  # pragma: no cover - exercised only in a Lambda deployment
+    from mangum import Mangum
+
+    handler = Mangum(app)
+except ImportError:  # pragma: no cover
+    handler = None

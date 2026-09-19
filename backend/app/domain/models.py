@@ -289,6 +289,12 @@ class AnalysisResult(BaseModel):
     evidence: Evidence | None = None
     limitations: list[str] = Field(default_factory=list)
     message: str | None = None
+    explanation: str | None = Field(
+        default=None,
+        description="Natural-language explanation, populated by the API layer "
+        "after the engine computes this result (app.agents.explain / "
+        "app.agents.bedrock) — never set by the engine itself.",
+    )
 
 
 class AnalysisJob(BaseModel):
