@@ -5,7 +5,8 @@ import type {
   ScenesPreview,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 class ApiError extends Error {
   status: number;
@@ -72,5 +73,33 @@ export const terraApi = {
   getAnalysis: (jobId: string) =>
     request<AnalysisJob>(`/v1/analyses/${jobId}`),
 };
+
+/**
+ * Turn an API failure into something a user can act on. The backend's own
+ * messages for bad input (400 invalid area, 422 unsupported question) are
+ * already written for people, so they pass through. A 502 is different: it
+ * carries whatever internal exception broke the analysis (e.g. GDAL's "Read
+ * failed. See previous exception for details."), which means nothing to a user
+ * — that is the satellite data service timing out, so say so.
+ */
+export function friendlyError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 502 || err.status === 504) {
+      return (
+        "The satellite data service didn't respond in time, so this analysis " +
+        "couldn't finish. Try again, or draw a smaller area — larger areas " +
+        "read more imagery and are more likely to time out."
+      );
+    }
+    if (err.status === 401 || err.status === 403) {
+      return "You're not signed in, or your session has expired. Sign in and try again.";
+    }
+    if (err.status === 429) {
+      return "Too many requests right now. Wait a moment and try again.";
+    }
+    return err.message;
+  }
+  return "Could not reach the Terra API. Check that the backend is running and NEXT_PUBLIC_API_URL is correct.";
+}
 
 export { ApiError };
