@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Terra — Earth Observation, without the plumbing.
+  API Gateway (HTTP API) -> Lambda (container image, FastAPI via Mangum)
+  -> DynamoDB (job state) + S3 (results/evidence) + Bedrock (optional, intent/explain).
+  See docs/architecture.md and docs/adr/ for design rationale.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+  BedrockEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable optional Bedrock intent/explain (deterministic fallback always available, §61)
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-5-haiku-20241022-v1:0
+
+Globals:
+  Function:
+    Timeout: 60          # API Gateway's own 29s integration timeout is the binding limit (see ADR 002)
+    MemorySize: 1024      # rasterio/GDAL + numpy benefit from headroom over the 128MB default
+    Environment:
+      Variables:
+        TERRA_JOB_STORE: dynamodb
+        DYNAMODB_TABLE: !Ref AnalysesTable
+        S3_RESULTS_BUCKET: !Ref ResultsBucket
+        AWS_REGION_NAME: !Ref AWS::Region
+        BEDROCK_ENABLED: !Ref BedrockEnabled
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+
+Resources:
+  # ------------------------------------------------------------------ #
+  # API
+  # ------------------------------------------------------------------ #
+  TerraHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins: ["*"]   # tighten to the deployed frontend origin once known (§31)
+        AllowMethods: ["GET", "POST"]
+        AllowHeaders: ["*"]
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub terra-api-${Stage}
+      PackageType: Image
+      ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/terra-api:latest"
+      # Container image (not a zip) because rasterio/GDAL exceed the 250MB
+      # zip-deployment limit (§Lambda in the brief; see docs/adr/002).
+      Events:
+        AnyRequest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TerraHttpApi
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalysesTable
+        - S3CrudPolicy:
+            BucketName: !Ref ResultsBucket
+        - Statement:
+            # Least privilege (§31, §91): only the Bedrock actions Terra
+            # actually calls, only when Bedrock is enabled at all. No
+            # AdministratorAccess, no wildcard resource beyond what Bedrock
+            # runtime invocation requires.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+
+  # ------------------------------------------------------------------ #
+  # State
+  # ------------------------------------------------------------------ #
+  AnalysesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub terra-analyses-${Stage}
+      BillingMode: PAY_PER_REQUEST   # no idle cost for a hackathon-scale workload (§67)
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true   # bound storage growth automatically (§67)
+
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub terra-results-${AWS::AccountId}-${Stage}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldResults
+            Status: Enabled
+            ExpirationInDays: 30   # cost discipline for a hackathon demo bucket (§67)
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # ------------------------------------------------------------------ #
+  # Observability
+  # ------------------------------------------------------------------ #
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/terra-api-${Stage}
+      RetentionInDays: 30
+
+Outputs:
+  ApiUrl:
+    Description: Terra API base URL
+    Value: !Sub "https://${TerraHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+  ResultsBucketName:
+    Value: !Ref ResultsBucket
+  AnalysesTableName:
+    Value: !Ref AnalysesTable
