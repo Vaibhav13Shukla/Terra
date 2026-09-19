@@ -52,8 +52,14 @@ Parameters:
 
 Globals:
   Function:
-    Timeout: 60          # API Gateway's own 29s integration timeout is the binding limit (see ADR 002)
+    # No global Timeout on purpose: the API and the worker have very different
+    # limits (API Gateway cuts HTTP APIs off at 30 s; a live analysis can take
+    # minutes), so each function sets its own below. A single global value was
+    # silently applying the API's short limit to the worker.
     MemorySize: 1024      # rasterio/GDAL + numpy benefit from headroom over the 128MB default
+    # Pinned so the image built on your machine matches the Lambda it runs on
+    # (an arm64 laptop would otherwise build an image x86_64 Lambda can't run).
+    Architectures: [x86_64]
     Environment:
       Variables:
         TERRA_JOB_STORE: dynamodb
@@ -77,7 +83,13 @@ Resources:
   TerraHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      StageName: !Ref Stage
+      # No StageName => SAM uses API Gateway's special "$default" stage, whose
+      # URL has NO stage prefix (https://<id>.execute-api.<region>.amazonaws.com/).
+      # A named stage ("dev") would put /dev in every request path; the FastAPI
+      # app + Mangum adapter don't strip it, so every route — /health included —
+      # returned 404 (reproduced by driving the app's Lambda handler with an API
+      # Gateway v2 event for rawPath "/dev/health"). `Stage` still names the
+      # other resources (functions, table, queues) so environments stay separate.
       CorsConfiguration:
         AllowOrigins: [!Ref FrontendOrigin]
         AllowMethods: ["GET", "POST"]
@@ -91,10 +103,24 @@ Resources:
 
   ApiFunction:
     Type: AWS::Serverless::Function
+    # Resource-level attribute (a sibling of Properties, not inside it). There is
+    # deliberately no ImageUri: `sam build` builds the image from this and
+    # `sam deploy --resolve-image-repos` creates the ECR repository and pushes it.
+    # (A hard-coded ImageUri pointed at a repository nothing created, so the first
+    # deploy could never have found an image.) Paths are relative to THIS template
+    # (infra/); the build context is the repo root because the Dockerfile copies
+    # backend/ — see /.dockerignore, which keeps .venv, node_modules and .git out.
+    Metadata:
+      DockerContext: ..
+      Dockerfile: infra/Dockerfile
+      DockerTag: latest
     Properties:
       FunctionName: !Sub terra-api-${Stage}
       PackageType: Image
-      ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/terra-api:latest"
+      # HTTP APIs cap an integration at 30 s, so a longer Lambda timeout would
+      # only mean the client gets a 503 while Lambda keeps (and bills) running.
+      # Longer work belongs in ProcessingMode=async (WorkerFunction below).
+      Timeout: 30
       # Container image (not a zip) because rasterio/GDAL exceed the 250MB
       # zip-deployment limit (§Lambda in the brief; see docs/adr/002).
       Events:
@@ -134,20 +160,31 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub terra-analyses-${Stage}
-      VisibilityTimeout: 120   # >= WorkerFunction's own timeout, so SQS won't redeliver mid-processing
+      # AWS's guidance for a Lambda SQS trigger is a visibility timeout of at least
+      # 6x the function timeout (WorkerFunction: 300 s), so a slow-but-healthy job
+      # is never redelivered — and processed twice — while still running.
+      VisibilityTimeout: 1800
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt AnalysesDLQ.Arn
         maxReceiveCount: 3   # a request that fails 3x is a real failure, not a transient blip
 
   WorkerFunction:
     Type: AWS::Serverless::Function
+    # Same image contents as ApiFunction (same app code/dependencies) — only the
+    # invoked entry point differs, via ImageConfig.Command overriding the
+    # Dockerfile's default CMD. Same Dockerfile/context, built for this function.
+    Metadata:
+      DockerContext: ..
+      Dockerfile: infra/Dockerfile
+      DockerTag: latest
     Properties:
       FunctionName: !Sub terra-worker-${Stage}
       PackageType: Image
-      ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/terra-api:latest"
-      # Same image as ApiFunction (same app code/dependencies) — only the
-      # invoked entry point differs, via ImageConfig.Command overriding the
-      # Dockerfile's default CMD. One image to build and push, not two.
+      # Live Sentinel-2 analyses were measured at ~20-30 s for a ~25 km² field
+      # but ~200 s for a ~47 km² one. The worker inherited a 60 s global timeout,
+      # so any longer job would be killed, redelivered 3x, then dead-lettered.
+      # 300 s covers that with headroom; Lambda's hard ceiling is 900 s.
+      Timeout: 300
       ImageConfig:
         Command: ["app.worker.handler.handler"]
       Events:
@@ -264,8 +301,8 @@ Resources:
 
 Outputs:
   ApiUrl:
-    Description: Terra API base URL
-    Value: !Sub "https://${TerraHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+    Description: Terra API base URL (no stage prefix — $default stage; no trailing slash)
+    Value: !Sub "https://${TerraHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   ResultsBucketName:
     Value: !Ref ResultsBucket
   AnalysesTableName:

@@ -1,0 +1,32 @@
+# Build context for infra/Dockerfile is the REPO ROOT (the Dockerfile copies
+# backend/). Without this file `sam build` would upload everything below to the
+# Docker daemon — including a ~300 MB .venv, node_modules and .git history.
+# The image itself only needs backend/requirements.txt and backend/app.
+
+# Dependencies / virtualenvs
+.venv/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+
+# VCS and tooling
+.git/
+.github/
+.claude/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+
+# Frontend build output and everything else the Lambda image never reads
+frontend/
+docs/
+evaluation/
+backend/tests/
+
+# Secrets / local config — must never end up in an image layer
+**/.env
+**/.env.*
+!**/.env.example
+.aws-sam/
+*.pem
+*.key
