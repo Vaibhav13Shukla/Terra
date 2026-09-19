@@ -24,7 +24,34 @@ compatible open licenses.
 | FastAPI | MIT | HTTP API |
 | pydantic | MIT | typed domain model / validation |
 | mangum | ISC | ASGI-to-Lambda adapter |
-| boto3 | Apache-2.0 | AWS SDK |
+| python-jose | MIT | verifies Cognito JWTs against the pool's JWKS |
+| boto3 | Apache-2.0 | AWS SDK — not listed in `requirements.txt` (imported lazily; the Lambda base image provides it) |
 
 Full dependency versions are pinned in `backend/requirements.txt`.
 Terra itself is released under the MIT License (see `LICENSE`).
+
+## Frontend (`frontend/`)
+
+### Basemap imagery — Sentinel-2 cloudless (EOX)
+
+The workspace map's basemap is the **Sentinel-2 cloudless 2020** mosaic served
+by EOX IT Services GmbH (<https://s2maps.eu>): *contains modified Copernicus
+Sentinel data 2020*, licensed
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+**Non-commercial.** Attribution is rendered on the map (see
+`frontend/components/AOIMap.tsx`). This is acceptable for the hackathon build;
+swap in a commercially licensed basemap (MapTiler, Mapbox, …) before any
+commercial launch. Tiles are streamed from EOX, not stored or redistributed.
+
+### Software (key dependencies; see `frontend/package.json` for versions)
+
+| Library | License | Purpose |
+|---|---|---|
+| Next.js / React | MIT | app framework / UI |
+| MapLibre GL JS | BSD-3-Clause | map rendering (also served from `public/maplibre/`, copied at build) |
+| Tailwind CSS | MIT | styling |
+| Framer Motion | MIT | animation |
+| three.js, React Three Fiber, drei | MIT | landing-page 3D globe |
+| amazon-cognito-identity-js | Apache-2.0 | Cognito sign-in (SRP) |
+| zustand | MIT | client state |
+| clsx | MIT | class-name helper |

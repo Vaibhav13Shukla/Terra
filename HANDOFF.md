@@ -1,9 +1,12 @@
 # Terra — Handoff (read this first)
 
 Written so anyone (or any Claude Code session) can continue without the original
-chat. State as of the `feat: add Next.js frontend (3D landing page, Cognito
-auth, AOI workspace)` commit (`598dd67`) on branch `claude/peaceful-gauss-osu4cl`
-— **not yet merged to `main`**, open it as a PR or merge it before continuing.
+chat. State: branch `frontend/continue` = the previous session's
+`claude/peaceful-gauss-osu4cl` (frontend + auth + async worker + CI + deploy
+runbook; a pure fast-forward of `main`, so it merges with no conflicts) **plus
+this session's frontend fixes and features** (3 commits, all inside
+`frontend/`, so they can't conflict with backend work). Neither branch is
+merged to `main` yet — open a PR or fast-forward `main` before continuing.
 Everything described here is pushed; nothing lives only on one laptop/session
 except each dev's local `.venv` / `node_modules`.
 
@@ -18,7 +21,9 @@ folder may still be called `MERU`; content is all Terra. The original pitch deck
 
 ## Status
 
-**Backend: done and verified offline; not yet deployed.** 145 tests, ruff
+**Backend: done and verified offline; not yet deployed.** 130 tests (127
+offline + 3 opt-in live-network; re-counted this session — earlier notes
+said 145/142), ruff
 clean, live-verified against real Sentinel-2 data through the running API
 (that verification predates this round's changes; re-verify auth/async/CORS
 against a real deploy — see `docs/DEPLOYMENT.md`).
@@ -36,48 +41,77 @@ against a real deploy — see `docs/DEPLOYMENT.md`).
 | CORS: configurable allowed origins (`CORS_ALLOW_ORIGINS`), security response headers | done |
 | Structured logging, bounded retry/backoff, HTTP timeouts | done |
 | IaC (SAM template: API + worker Lambda, Cognito, SQS+DLQ, throttling) | written, `cfn-lint`-clean, **NOT deployed** |
-| CI (GitHub Actions: ruff + pytest + cfn-lint on push/PR) | done |
+| CI (GitHub Actions: ruff + pytest + cfn-lint + frontend lint/build, on push to `main` / PRs) | written, **never run**; `ruff format --check` will fail (see item 2 below) |
 | Docs: architecture, ADR 001/002/003, RISKS, HACKATHON_WRITEUP, eval scenarios, `docs/DEPLOYMENT.md` runbook, `docs/FRONTEND_DESIGN.md` | done |
 
 **Frontend: built in this repo now (`frontend/`), not "separate" anymore —
-see the "Frontend, from scratch" section below.** Verified with `next
-build`/`next lint` (clean) and Playwright screenshots of every route; never
-run against a real deployed backend or a real Cognito pool.
+see the "Frontend" section below.** `next lint` and `next build` are clean, and
+this session it was driven end to end in a real browser against a running local
+backend: demo field -> fixtures analysis (-18.0%), a freehand-drawn area -> live
+Sentinel-2 analysis (real result), the no-data path, history, and the copy-paste
+curl (re-run and confirmed to reproduce the identical result). It has **not**
+been run against a deployed backend or a real Cognito pool.
 
 ## What is NOT done (in priority order)
 
-1. **Merge `claude/peaceful-gauss-osu4cl` into `main`** (or open a PR and
-   review it first) — everything in this handoff is on that branch only.
-   `git fetch && git checkout claude/peaceful-gauss-osu4cl` to get it.
-2. **AWS deploy** — needs someone's AWS credentials. Full step-by-step:
+1. **Merge `frontend/continue` into `main`** (or open a PR and review it
+   first) — everything in this handoff is on that branch only. It is a linear
+   descendant of `main`, so a fast-forward works with no conflicts.
+   `git fetch && git checkout frontend/continue` to get it.
+2. **CI has never run, and the first PR will go red on `ruff format`.** The
+   workflow triggers only on pushes to `main` and on pull requests, and the
+   feature branch was pushed without a PR (`gh run list` returns nothing).
+   Its `ruff format --check app tests` step fails locally: **42 backend files
+   would be reformatted** (e.g. a blank line after module docstrings — real
+   style drift, not a Windows artifact). Two honest options: run
+   `ruff format app tests` in ONE dedicated commit before any other backend work
+   (big diff, so do it when nobody else has backend changes in flight), or drop
+   the format step from CI. It was deliberately NOT done here: it touches ~42
+   backend files and would be a merge-conflict magnet. The Python lint/test
+   steps and the new frontend job are unaffected. The frontend job (Node 22,
+   `npm ci`, lint, build) uses exactly the commands verified locally but has not
+   yet run on GitHub's runners.
+3. **AWS deploy** — needs someone's AWS credentials. Full step-by-step:
    `docs/DEPLOYMENT.md` (account setup, Bedrock model access, Cognito test
    user, first deploy, smoke test, cost controls, teardown). This is also the
    first real test of `DynamoDBJobStore.from_table_name`, the container
    build, Cognito verification against a real pool, SQS enqueue/consume, and
    Bedrock model access — budget time for surprises, same as before.
-3. **Deploy the frontend** — it exists (`frontend/`) but has never been
+4. **Deploy the frontend** — it exists (`frontend/`) but has never been
    deployed anywhere; it only ran in a throwaway dev-server session with no
    public URL. Fastest path: https://vercel.com/new, import this repo, set
    **Root Directory to `frontend`**, deploy. Then set its env vars
    (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_COGNITO_USER_POOL_ID`,
    `NEXT_PUBLIC_COGNITO_APP_CLIENT_ID` — see `frontend/.env.local.example`)
-   once the backend is deployed (step 2) and redeploy.
-4. **Wire the two together**: once both are deployed, redeploy the backend
+   once the backend is deployed (step 3) and redeploy.
+5. **Wire the two together**: once both are deployed, redeploy the backend
    with `FrontendOrigin=<the real Vercel/custom domain>` (defaults to `*` —
    `docs/DEPLOYMENT.md` §10), and set the frontend's env vars to point at
    the real `ApiUrl`/Cognito ids from the SAM deploy outputs.
-5. **Demo video** (<=3 min, judging gives no credit for what isn't shown).
+6. **Demo video** (<=3 min, judging gives no credit for what isn't shown).
    Plan: fixtures path first (deterministic ~18% NDVI decline), then one live
    Sentinel-2 run to show it's real. Say out loud which is which. The live result
    is genuinely near-zero change (-0.2%) for the demo AOI; that is honest, not a bug.
-6. Decide whether to flip `AuthEnabled=true` before submission (depends on
+7. Decide whether to flip `AuthEnabled=true` before submission (depends on
    whether the hackathon rubric rewards real user auth, and whether the
    frontend's login flow is ready — `docs/DEPLOYMENT.md` §6).
-7. Swap the frontend's map basemap: it currently uses MapLibre's free
-   `demotiles.maplibre.org` style (zero API keys, but minimal — just country
-   outlines) with a CSS `invert()` filter hack to make it dark. Fine for a
-   demo, not for a real launch — get a MapTiler/Mapbox key and swap
-   `DEMO_STYLE` in `frontend/components/AOIMap.tsx`.
+8. **Live-analysis latency vs. drawn area** (measured this session, synchronous
+   mode, live Sentinel-2): the ~25 km² demo field takes ~20-30 s, but a
+   hand-drawn ~47 km² area took **~200 s**, and a second concurrent request
+   failed at 51 s with GDAL's "Read failed". Latency grows much faster than
+   area, and a deployed API Gateway kills synchronous requests at 29 s. The
+   frontend now shows the area, warns above ~30 km² for live imagery, and turns
+   the raw 502 into an actionable message — but that only manages the symptom.
+   The real fix is already written: `TERRA_PROCESSING_MODE=async` (SQS + worker
+   Lambda; the UI already polls), plus a tighter AOI cap for live mode
+   (backend allows 2500 km² today — `MAX_AOI_AREA_KM2` in
+   `backend/app/services/geometry.py`). Neither has run against real AWS.
+9. Swap the map basemap before any *commercial* launch: it now uses the
+   keyless Sentinel-2 cloudless 2020 mosaic from EOX (real imagery, matches
+   what Terra analyses), which is **CC BY-NC-SA 4.0** — fine for this
+   hackathon, not for commercial use. Get a MapTiler/Mapbox key and change
+   `BASEMAP` in `frontend/components/AOIMap.tsx`. Attribution is rendered and
+   listed in `THIRD_PARTY_NOTICES.md`.
 
 ## Run it
 
@@ -85,7 +119,7 @@ run against a real deployed backend or a real Cognito pool.
 python -m venv .venv
 .venv/Scripts/python -m pip install -r backend/requirements-dev.txt   # Windows
 cd backend
-../.venv/Scripts/python -m pytest              # 142 offline tests
+../.venv/Scripts/python -m pytest              # 127 offline tests
 ../.venv/Scripts/python -m pytest -m network   # 3 live tests (real Earth Search + COGs)
 ../.venv/Scripts/python -m ruff check app tests
 ../.venv/Scripts/python -m uvicorn app.api.main:app --port 8000
@@ -103,8 +137,13 @@ npm run dev                        # http://localhost:3000
 
 The landing page and auth screens work with no backend running; `/workspace`
 needs the backend up (`NEXT_PUBLIC_API_URL`, defaults to `http://localhost:8000`).
+With no Cognito ids in `.env.local` the workspace runs in open "Demo mode" (no
+sign-in) — that is the intended local/dev experience, not a bug. `npm run dev`
+and `npm run build` first run `scripts/copy-maplibre-worker.mjs` (npm
+`predev`/`prebuild`), which copies MapLibre's worker into `public/maplibre/`
+(git-ignored) — without it the AOI overlay silently never draws.
 
-## Frontend, from scratch (what exists, what doesn't)
+## Frontend (what exists, what doesn't)
 
 `frontend/` is a Next.js 16 (App Router, Turbopack) app — landing page +
 Cognito auth + AOI-drawing workspace. Design spec: `docs/FRONTEND_DESIGN.md`.
@@ -121,13 +160,26 @@ wireframe-globe hero), MapLibre GL JS, `amazon-cognito-identity-js`, Zustand.
   uses, so it should work, but budget time for the first real login to
   surface something.
 - The workspace's map (`components/AOIMap.tsx`) draws an AOI by
-  click-to-add-vertex, double-click to close — no undo/edit-vertex UI. It's
-  MapLibre with the free `demotiles.maplibre.org` style, inverted via CSS
-  filter for a dark theme (see item 7 above — swap this before a real launch).
-- The app has never been deployed or connected to a real backend — see "What
-  is NOT done" above. It was verified by running `next build`/`next lint`
-  (both clean) and screenshotting every route with a headless Chromium
-  (Playwright), not by a human clicking through it in a real browser yet.
+  click-to-add-vertex, double-click to close — no undo/edit-vertex UI. It is
+  MapLibre on the keyless Sentinel-2 cloudless mosaic (see item 9 above for
+  the licence caveat), renders the AOI from the store (`lib/workspaceStore.ts`
+  is the single source of truth), and frames the demo field on load.
+- The analysis panel is split into `components/QuestionForm.tsx` (demo-field
+  preset, question, dates, provider, live `/v1/scenes` observation preview,
+  area + large-area warning), `ResultView.tsx` (headline, explanation, data
+  quality, limitations, how-it-was-produced, evidence, curl, JSON),
+  `HistoryList.tsx` (`GET /v1/analyses`) and a thin `InspectorPanel.tsx`
+  (tabs + polling). Everything shown comes from fields the API returns; fixture
+  results always carry a "not live imagery" banner. Demo AOI/dates live in
+  `lib/demo.ts` (one place, on purpose — fixtures only have Jul-Aug 2025).
+- Verified in a real browser against a local backend (see the Status section).
+  Not verified: a deployed backend, real Cognito, mobile/small screens (the
+  panel is a fixed 380 px column), and the async/polling path against real SQS.
+- The frontend has no automated tests yet (no Vitest/Playwright specs) — the
+  verification above was manual. Adding a couple of Playwright specs for the
+  demo path (load demo field -> run -> expect -18.0%) would be the highest-value
+  next test. CI (`.github/workflows/ci.yml`) gained a frontend lint + build job
+  this session — but see "CI has never run" in the priority list below.
 
 ## Demo AOI (verified live to have 17-20 low-cloud scenes per period)
 
@@ -209,7 +261,36 @@ provider `sentinel-2-l2a` (real) or `fixtures` (deterministic).
   `demotiles.maplibre.org` (the map's tile source) were all rejected with a
   403 at the proxy level from inside this sandbox. That's this sandbox's own
   policy; it does not mean these services are broken or blocked for a real
-  deployed frontend running on someone's own machine/Vercel.
+  deployed frontend running on someone's own machine/Vercel. (Confirmed later
+  from an unrestricted machine: the map tile sources load fine.)
+- **A map that "works" can still be missing its whole overlay layer.**
+  MapLibre v6 runs GeoJSON sources in a web worker, found relative to its own
+  `import.meta.url`. Turbopack rewrites that into `/_next/static/chunks/`,
+  where the file doesn't exist, so the server answers with an HTML 404 and
+  every GeoJSON layer (the drawn AOI) silently renders nothing — while the raster
+  basemap, which needs no worker, looks perfectly healthy. The tell was one
+  recurring console line: "Failed to load module script: … MIME type of
+  text/html". Fixed by serving the worker from `public/` +
+  `setWorkerUrl()` (`scripts/copy-maplibre-worker.mjs`, run by
+  `predev`/`prebuild`). A screenshot-only check would never have caught it.
+- **Don't trust the first plausible cause.** The AOI bug had two decoys: a
+  `load`-vs-`style.load` event timing theory (a harmless improvement, not the
+  cause) and, once I inspected the live map object, an apparently "stuck"
+  animation. That last one was the test browser pane delivering zero
+  `requestAnimationFrame` callbacks — an environment artifact, not an app bug;
+  measure (`rAF` tick count) before concluding.
+- **Latency scales with area faster than you'd hope.** See item 8 above:
+  ~25 km² ≈ 20-30 s live, ~47 km² ≈ 200 s, and concurrent live requests can
+  time out each other. Test the UI with a freehand-drawn area, not just the
+  demo field.
+- **Verify a shipped snippet by running it.** The "Use via API" curl is built
+  from the job's stored request; it was executed against the backend and
+  confirmed to return the identical result. Do the same after changing it.
+- **The `config-protection` hook blocks edits to `eslint.config.mjs`.** When the
+  copied MapLibre worker flooded ESLint with ~1,100 warnings, the answer was an
+  `/* eslint-disable */` header written by the copy script — not loosening the
+  shared config. Generated third-party code gets the header; our source stays
+  fully linted.
 
 ## Conventions
 
@@ -221,10 +302,13 @@ bugs late in the build.
 
 ## Continuing from another laptop
 
-Clone the repo and **check out `claude/peaceful-gauss-osu4cl`** (not `main` —
-this branch is 7 commits ahead of `main` and the entire frontend only exists
-here; merge or PR it into `main` first if you want `main` to be current). Create the backend venv and frontend `node_modules` as above ("Run
-it"). Open Claude Code in the repo folder; it loads `CLAUDE.md`, which points
+Clone the repo and **check out `frontend/continue`** (not `main` — this branch
+is 10 commits ahead of `main` and the entire frontend only exists here; merge or
+PR it into `main` first if you want `main` to be current; `claude/peaceful-gauss-osu4cl`
+is the same history minus this session's last 3 commits). Create the backend
+venv (`pip install -r backend/requirements-dev.txt`) and frontend
+`node_modules` as above ("Run it"). An *existing* venv created before the auth
+work needs a re-install too (`python-jose` is a new dependency). Open Claude Code in the repo folder; it loads `CLAUDE.md`, which points
 here. The original chat transcript is not in git — this file and the code are
 the entire handoff. Use your own Claude/GitHub account rather than sharing one
 login (add collaborators on GitHub).

@@ -38,11 +38,16 @@ app.api.main:app --port 8000`) or `NEXT_PUBLIC_API_URL` pointed at a
 deployed API. The landing page and auth screens work without a backend;
 `/workspace` needs one to actually run analyses.
 
-Auth is optional on the backend by default (`AUTH_ENABLED=false`) — you can
-exercise `/workspace`'s analysis flow by logging in only once the backend
-has `AUTH_ENABLED=true` and a Cognito pool configured. Until then, the
-client-side route guard on `/workspace` still requires a session token, so
-sign up/log in against a real deployed Cognito pool to reach it.
+Auth is optional on the backend by default (`AUTH_ENABLED=false`), and the
+frontend matches it: with **no** `NEXT_PUBLIC_COGNITO_*` ids set, `/workspace`
+runs in open **demo mode** (badge in the header, no sign-in, launch buttons go
+straight to the workspace). Set both Cognito ids and the sign-in flow and the
+`/workspace` route guard turn on (`isAuthConfigured()` in `lib/auth.ts`). To
+try it: load the demo field, keep the "Fixtures" data source, and run.
+
+`npm run dev` / `npm run build` first run `scripts/copy-maplibre-worker.mjs`,
+which copies MapLibre's web worker into `public/maplibre/` (git-ignored). It is
+required: without it the drawn area never appears on the map.
 
 ## Structure
 
@@ -50,18 +55,26 @@ sign up/log in against a real deployed Cognito pool to reach it.
 app/
   page.tsx            landing page (3D hero, scroll-revealed sections)
   login/, signup/, confirm/    Cognito auth screens
-  workspace/          the authenticated app (map + inspector panel)
+  workspace/          the app (map + inspector panel); login-gated only if Cognito is configured
 components/
   Globe3D.tsx          landing page hero 3D scene (R3F)
   ScrollReveal.tsx      whileInView animation wrapper
   Navbar.tsx, AuthCard.tsx
-  AOIMap.tsx            MapLibre map + click-to-draw AOI polygon
-  InspectorPanel.tsx    question form + result/evidence/status display
+  AOIMap.tsx            MapLibre map (satellite basemap) + click-to-draw AOI
+  InspectorPanel.tsx    tabs (New/Result | History) + job polling
+  QuestionForm.tsx      demo field, question, dates, provider, observation preview
+  ResultView.tsx        headline, evidence, how-it-was-produced, curl, JSON
+  HistoryList.tsx       recent analyses (GET /v1/analyses)
+  CopyButton.tsx
 lib/
-  api.ts               typed client for the Terra API
+  api.ts               typed client for the Terra API + friendlyError()
   types.ts             mirrors backend/app/domain/models.py — keep in sync
-  auth.ts               Cognito wrapper (signup/confirm/login/tokens)
-  store.ts, workspaceStore.ts   Zustand stores
+  auth.ts               Cognito wrapper + isAuthConfigured()/entryHref()
+  store.ts, workspaceStore.ts   Zustand stores (auth; AOI/job state)
+  demo.ts              the canonical demo AOI/dates (one place, on purpose)
+  format.ts, geo.ts    display formatting; AOI area (mirrors the backend's)
+scripts/
+  copy-maplibre-worker.mjs   predev/prebuild: serve MapLibre's worker from public/
 ```
 
 ## Notes
@@ -69,9 +82,13 @@ lib/
 - `lib/types.ts` is hand-kept in sync with the backend's Pydantic models
   (`backend/app/domain/models.py`) and `docs/openapi.json`. If you change
   the API's request/response shape, update both.
-- The workspace map uses MapLibre's free `demotiles.maplibre.org` style so
-  the app works with zero API keys out of the box. It's a minimal
-  basemap — swap in a proper vector/dark tile provider before a public
-  launch.
+- The workspace map uses the keyless Sentinel-2 cloudless 2020 mosaic from EOX
+  so the app shows real imagery with zero API keys. It is **CC BY-NC-SA 4.0**
+  (non-commercial) — fine for the hackathon; swap `BASEMAP` in
+  `components/AOIMap.tsx` for a commercially licensed provider before any
+  commercial launch. Attribution is rendered on the map and listed in the
+  root `THIRD_PARTY_NOTICES.md`.
+- Live analyses on large drawn areas are slow (see `HANDOFF.md`, item 8); the
+  form warns above ~30 km².
 - AOI drawing is click-to-add-vertex, double-click to close — intentionally
   minimal for the hackathon timeline; there's no undo/edit-vertex UI yet.
