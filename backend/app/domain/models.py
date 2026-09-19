@@ -162,6 +162,40 @@ class Scene(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Natural-language intent (§10)
+# --------------------------------------------------------------------------- #
+
+
+class AnalysisIntent(BaseModel):
+    """Structured output of mapping a natural-language question to a supported
+    analysis (§10, §37). Produced by app.agents.intent_parser (deterministic,
+    default) or app.agents.bedrock (optional). The API layer combines a
+    ``supported`` intent with the caller's AOI/dates to build a full
+    :class:`AnalysisRequest`; an ``unsupported`` intent is returned to the user
+    as a clear explanation rather than an improvised analysis (§51)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    supported: bool
+    analysis_type: AnalysisType | None = None
+    cloud_threshold: float = Field(default=20.0, ge=0.0, le=100.0)
+    reason: str | None = Field(
+        default=None,
+        description="Human-readable explanation; set when unsupported, or as "
+        "an extra caution for questions that ask for more certainty than the "
+        "metric supports.",
+    )
+
+    @model_validator(mode="after")
+    def _analysis_type_present_iff_supported(self) -> AnalysisIntent:
+        if self.supported and self.analysis_type is None:
+            raise ValueError("supported intent must include an analysis_type")
+        if not self.supported and self.analysis_type is not None:
+            raise ValueError("unsupported intent must not include an analysis_type")
+        return self
+
+
+# --------------------------------------------------------------------------- #
 # Requests
 # --------------------------------------------------------------------------- #
 
