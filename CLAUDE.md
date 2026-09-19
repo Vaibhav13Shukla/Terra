@@ -1,5 +1,8 @@
 # Terra — working notes for Claude Code
 
+**New session or new laptop? Read [HANDOFF.md](HANDOFF.md) first** — current
+status, what's left, how to run everything, and the hard-won lessons.
+
 **Terra** = "Earth Observation, without the plumbing." Turns a natural-language
 geospatial question into a reproducible, evidence-backed satellite analysis.
 This repo is **backend + EO engine + AI orchestration + AWS infra + tests**.
