@@ -15,12 +15,17 @@ satisfies the requirement):
 * Every write also sets a ``ttl`` attribute (epoch seconds, 30 days out),
   matching the table's TTL configuration in ``infra/template.yaml`` — bounds
   storage growth automatically (§67).
-* ``list_recent`` uses a table scan + client-side sort. Adequate at
-  hackathon/demo scale; a production deployment would add a GSI (constant
-  partition key, ``created_at`` sort key) instead — noted here rather than
-  built, since it cannot be tested without a real DynamoDB table or a fuller
-  mocking layer than this environment has (no boto3 installed; see
-  docs/adr/003-ai-orchestration.md for the same trade-off applied to Bedrock).
+* ``list_recent`` uses a table scan + client-side sort, and does not follow
+  ``LastEvaluatedKey`` — a single ``scan()`` call returns at most 1MB, and
+  each stored job's ``data`` blob (full evidence, including S3 hrefs per
+  scene) can run tens of KB, so at hackathon/demo scale this silently
+  truncates after roughly a few dozen jobs and is not guaranteed to return
+  the *most* recent ones once truncation kicks in. A production deployment
+  would add a GSI (constant partition key, ``created_at`` sort key) instead
+  — noted here rather than built, since it cannot be tested without a real
+  DynamoDB table or a fuller mocking layer than this environment has (no
+  boto3 installed; see docs/adr/003-ai-orchestration.md for the same
+  trade-off applied to Bedrock).
 
 This module is fully unit-testable without `boto3` installed: the
 constructor takes a duck-typed ``table`` object (anything with

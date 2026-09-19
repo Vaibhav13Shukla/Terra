@@ -132,13 +132,19 @@ The default test run is fully deterministic and needs no network or AWS credenti
 ```
 GET  /health
 GET  /v1/providers
+GET  /v1/scenes                   # preview candidate observations for a bbox/date range
 POST /v1/analyses                 # create an analysis job (question or structured)
+GET  /v1/analyses                 # recent jobs (history)
 GET  /v1/analyses/{id}            # poll job status / result
 GET  /v1/analyses/{id}/evidence   # evidence for a completed analysis
 ```
 
-Full request/response schemas are in the generated OpenAPI docs at `/docs` when the
-API is running.
+**For the frontend team:** the full request/response contract is in
+[`docs/openapi.json`](docs/openapi.json) — a static export of the live
+FastAPI schema, so you can build against it without running the backend.
+It's also served live at `/openapi.json` (interactive docs at `/docs`) when
+the API is running. Regenerate it after any API change with
+`python scripts/export_openapi.py`.
 
 ## Testing & evaluation
 

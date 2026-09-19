@@ -1,0 +1,1016 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Terra API",
+    "description": "Earth Observation, without the plumbing.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "summary": "List Providers",
+        "operationId": "list_providers_v1_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Providers V1 Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scenes": {
+      "get": {
+        "summary": "List Scenes",
+        "description": "Preview candidate satellite observations for a bbox/date range without\nrunning a full analysis (\u00a743, \u00a79 \u2014 \"show satellite observations\"). A\nlightweight bbox is used here (rather than the full AOI polygon\nPOST /v1/analyses accepts) since this is a browse/discovery endpoint, not\nthe pixel-level analysis itself.",
+        "operationId": "list_scenes_v1_scenes_get",
+        "parameters": [
+          {
+            "name": "min_lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Min Lon"
+            }
+          },
+          {
+            "name": "min_lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Min Lat"
+            }
+          },
+          {
+            "name": "max_lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Max Lon"
+            }
+          },
+          {
+            "name": "max_lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Max Lat"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "End Date"
+            }
+          },
+          {
+            "name": "cloud_threshold",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 20.0,
+              "title": "Cloud Threshold"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "sentinel-2-l2a",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Scenes V1 Scenes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyses": {
+      "get": {
+        "summary": "List Analyses",
+        "operationId": "list_analyses_v1_analyses_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AnalysisJob"
+                  },
+                  "title": "Response List Analyses V1 Analyses Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Analysis",
+        "operationId": "create_analysis_v1_analyses_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyses/{job_id}": {
+      "get": {
+        "summary": "Get Analysis",
+        "operationId": "get_analysis_v1_analyses__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyses/{job_id}/evidence": {
+      "get": {
+        "summary": "Get Evidence",
+        "operationId": "get_evidence_v1_analyses__job_id__evidence_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Evidence"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AOI": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "Polygon",
+            "title": "Type",
+            "default": "Polygon"
+          },
+          "coordinates": {
+            "items": {
+              "items": {
+                "prefixItems": [
+                  {
+                    "type": "number",
+                    "maximum": 180.0,
+                    "minimum": -180.0
+                  },
+                  {
+                    "type": "number",
+                    "maximum": 90.0,
+                    "minimum": -90.0
+                  }
+                ],
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Coordinates",
+            "description": "GeoJSON Polygon coordinates: [ [ [lon,lat], ... ] ]"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "coordinates"
+        ],
+        "title": "AOI",
+        "description": "Area of Interest as a GeoJSON-style Polygon (WGS84).\n\nWe accept the subset of GeoJSON we actually support \u2014 a single Polygon \u2014\nrather than the full spec, so validation can be strict and total. Geometry\ncorrectness (winding, self-intersection, area bounds) is enforced by\n:mod:`app.services.geometry`, not here; this type only guarantees shape."
+      },
+      "AnalysisJob": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "default": "created"
+          },
+          "request": {
+            "$ref": "#/components/schemas/AnalysisRequest"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "request",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AnalysisJob",
+        "description": "Persistent job record (mirrors the DynamoDB item shape)."
+      },
+      "AnalysisRequest": {
+        "properties": {
+          "aoi": {
+            "$ref": "#/components/schemas/AOI"
+          },
+          "analysis_type": {
+            "$ref": "#/components/schemas/AnalysisType"
+          },
+          "date_range": {
+            "$ref": "#/components/schemas/DateRange"
+          },
+          "comparison_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DateRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Baseline period for change analyses; required for ndvi_change."
+          },
+          "cloud_threshold": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Cloud Threshold",
+            "description": "Max scene cloud cover percent",
+            "default": 20.0
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "sentinel-2-l2a"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "aoi",
+          "analysis_type",
+          "date_range"
+        ],
+        "title": "AnalysisRequest",
+        "description": "Fully-specified, validated analysis request (the deterministic contract).\n\nThe natural-language layer's job is to *produce* one of these; it never\nperforms the analysis itself (see docs/adr/003)."
+      },
+      "AnalysisResult": {
+        "properties": {
+          "analysis_type": {
+            "$ref": "#/components/schemas/AnalysisType"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Metric"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data_quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DataQuality"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Evidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation",
+            "description": "Natural-language explanation, populated by the API layer after the engine computes this result (app.agents.explain / app.agents.bedrock) \u2014 never set by the engine itself."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_type",
+          "status"
+        ],
+        "title": "AnalysisResult",
+        "description": "Decision-ready output of an analysis job."
+      },
+      "AnalysisType": {
+        "type": "string",
+        "enum": [
+          "ndvi_change",
+          "ndvi_snapshot"
+        ],
+        "title": "AnalysisType",
+        "description": "Analyses Terra can actually perform. Adding a member is a deliberate act:\nit must be wired into the processing engine and covered by tests."
+      },
+      "CreateAnalysisRequest": {
+        "properties": {
+          "aoi": {
+            "$ref": "#/components/schemas/AOI"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "comparison_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Start Date"
+          },
+          "comparison_end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison End Date"
+          },
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Direct analysis type; alternative to 'question'."
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question",
+            "description": "Natural-language question; alternative to 'analysis'."
+          },
+          "cloud_threshold": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Cloud Threshold",
+            "default": 20.0
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "sentinel-2-l2a"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "aoi",
+          "start_date",
+          "end_date"
+        ],
+        "title": "CreateAnalysisRequest",
+        "description": "POST /v1/analyses request body.\n\nExactly one of ``analysis`` (direct, structured) or ``question``\n(natural-language, resolved via the intent parser) must be given."
+      },
+      "DataAsset": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Logical band key, e.g. 'red', 'nir', 'scl'"
+          },
+          "href": {
+            "type": "string",
+            "title": "Href",
+            "description": "COG URL (https:// or s3://)"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale",
+            "description": "Reflectance scale factor"
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset",
+            "description": "Reflectance additive offset"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "href"
+        ],
+        "title": "DataAsset",
+        "description": "A single retrievable band/asset within a scene.\n\n``scale``/``offset`` are the reflectance conversion factors for this asset,\nwhen the provider can supply them (e.g. from STAC ``raster:bands``\nmetadata). They are NOT reliably present in the COG's own GDAL band tags \u2014\nsee :mod:`app.providers.sentinel2` \u2014 so providers should populate them from\ncatalog metadata during ``search()`` rather than inferring them at read\ntime. ``None`` means \"unknown\"; the reader falls back to documented\nprovider defaults."
+      },
+      "DataQuality": {
+        "properties": {
+          "scenes_used": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Scenes Used"
+          },
+          "scenes_rejected": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Scenes Rejected"
+          },
+          "cloud_threshold": {
+            "type": "number",
+            "title": "Cloud Threshold"
+          },
+          "valid_pixel_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Pixel Ratio"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scenes_used",
+          "scenes_rejected",
+          "cloud_threshold"
+        ],
+        "title": "DataQuality",
+        "description": "Data-quality summary attached to every result (\u00a762 \u2014 never hide uncertainty)."
+      },
+      "DateRange": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "title": "End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "DateRange",
+        "description": "Inclusive date range, ISO ``YYYY-MM-DD``."
+      },
+      "Evidence": {
+        "properties": {
+          "scenes": {
+            "items": {
+              "$ref": "#/components/schemas/Scene"
+            },
+            "type": "array",
+            "title": "Scenes"
+          },
+          "formula": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula"
+          },
+          "processing_steps": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessingStep"
+            },
+            "type": "array",
+            "title": "Processing Steps"
+          },
+          "bands_used": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bands Used"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Evidence",
+        "description": "Traceability for a result: which scenes, formula, and steps produced it."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "created",
+          "discovering",
+          "processing",
+          "analyzing",
+          "completed",
+          "failed"
+        ],
+        "title": "JobStatus",
+        "description": "Lifecycle of an analysis job."
+      },
+      "Metric": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "current_value": {
+            "type": "number",
+            "title": "Current Value"
+          },
+          "comparison_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Value"
+          },
+          "absolute_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Absolute Change"
+          },
+          "percentage_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage Change"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "current_value"
+        ],
+        "title": "Metric",
+        "description": "A single computed metric with optional before/after comparison."
+      },
+      "ProcessingStep": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "detail"
+        ],
+        "title": "ProcessingStep",
+        "description": "One recorded step in the pipeline, for the technical-details/evidence panel."
+      },
+      "Scene": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "datetime": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Datetime"
+          },
+          "cloud_cover": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Cover",
+            "description": "Scene cloud cover percent"
+          },
+          "assets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DataAsset"
+            },
+            "type": "object",
+            "title": "Assets"
+          },
+          "selected": {
+            "type": "boolean",
+            "title": "Selected",
+            "default": false
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "datetime"
+        ],
+        "title": "Scene",
+        "description": "A candidate satellite observation returned by a provider's search.\n\n``selected``/``rejection_reason`` are filled by the quality filter so the\nsame object can carry evidence about why it was or wasn't used."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
