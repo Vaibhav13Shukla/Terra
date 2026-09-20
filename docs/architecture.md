@@ -147,7 +147,7 @@ public API's request/response shapes. This is now built —
 `TERRA_PROCESSING_MODE=async` enqueues to SQS (`app.services.analysis_queue`)
 and a separate worker Lambda (`app.worker.handler`) processes it — but, like
 every AWS integration in this repo, has not yet been exercised against real
-AWS infrastructure; see ADR 002's update and `docs/DEPLOYMENT.md` §7.
+AWS infrastructure; see ADR 002's update and `docs/DEPLOYMENT.md` Part D.
 
 ## 10. Trade-offs (summary)
 

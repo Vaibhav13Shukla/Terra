@@ -1,12 +1,15 @@
 # Terra — Handoff (read this first)
 
 Written so anyone (or any Claude Code session) can continue without the original
-chat. State: branch `frontend/continue` = the previous session's
-`claude/peaceful-gauss-osu4cl` (frontend + auth + async worker + CI + deploy
-runbook; a pure fast-forward of `main`, so it merges with no conflicts) **plus
-this session's frontend fixes and features** (3 commits, all inside
-`frontend/`, so they can't conflict with backend work). Neither branch is
+chat. State: branch **`infra/aws-deploy-fixes`** is the newest work and is stacked
+on `frontend/continue` (which is the previous session's
+`claude/peaceful-gauss-osu4cl` — frontend + auth + async worker + CI + deploy
+runbook — plus a later round of frontend fixes). `main` is behind both. Nothing is
 merged to `main` yet — open a PR or fast-forward `main` before continuing.
+`infra/aws-deploy-fixes` adds: the AWS deployment fixes and rewritten runbook
+(see "AWS deployment readiness" below), async-mode progress in the web UI, a
+static-export frontend build, Bedrock observability, and an offline-test safety
+guard.
 Everything described here is pushed; nothing lives only on one laptop/session
 except each dev's local `.venv` / `node_modules`.
 
@@ -21,9 +24,8 @@ folder may still be called `MERU`; content is all Terra. The original pitch deck
 
 ## Status
 
-**Backend: done and verified offline; not yet deployed.** 130 tests (127
-offline + 3 opt-in live-network; re-counted this session — earlier notes
-said 145/142), ruff
+**Backend: done and verified offline; not yet deployed.** 140 tests (137
+offline + 3 opt-in live-network), ruff
 clean, live-verified against real Sentinel-2 data through the running API
 (that verification predates this round's changes; re-verify auth/async/CORS
 against a real deploy — see `docs/DEPLOYMENT.md`).
@@ -40,7 +42,7 @@ against a real deploy — see `docs/DEPLOYMENT.md`).
 | Async processing: SQS enqueue + worker Lambda (`TERRA_PROCESSING_MODE=async`) | done, tested with an in-memory fake queue/SQS event; never run against real SQS |
 | CORS: configurable allowed origins (`CORS_ALLOW_ORIGINS`), security response headers | done |
 | Structured logging, bounded retry/backoff, HTTP timeouts | done |
-| IaC (SAM template: API + worker Lambda, Cognito, SQS+DLQ, throttling) | written, `cfn-lint`-clean, **NOT deployed** |
+| IaC (SAM template: API + worker Lambda, Cognito, SQS+DLQ, throttling) | written; `cfn-lint`-clean **with the SAM transform**; defects found and fixed on `infra/aws-deploy-fixes` (see below); **NOT deployed**, image never built (no Docker/SAM here) |
 | CI (GitHub Actions: ruff + pytest + cfn-lint + frontend lint/build, on push to `main` / PRs) | written, **never run**; `ruff format --check` will fail (see item 2 below) |
 | Docs: architecture, ADR 001/002/003, RISKS, HACKATHON_WRITEUP, eval scenarios, `docs/DEPLOYMENT.md` runbook, `docs/FRONTEND_DESIGN.md` | done |
 
@@ -86,7 +88,7 @@ been run against a deployed backend or a real Cognito pool.
    once the backend is deployed (step 3) and redeploy.
 5. **Wire the two together**: once both are deployed, redeploy the backend
    with `FrontendOrigin=<the real Vercel/custom domain>` (defaults to `*` —
-   `docs/DEPLOYMENT.md` §10), and set the frontend's env vars to point at
+   `docs/DEPLOYMENT.md` Part E6), and set the frontend's env vars to point at
    the real `ApiUrl`/Cognito ids from the SAM deploy outputs.
 6. **Demo video** (<=3 min, judging gives no credit for what isn't shown).
    Plan: fixtures path first (deterministic ~18% NDVI decline), then one live
@@ -94,7 +96,8 @@ been run against a deployed backend or a real Cognito pool.
    is genuinely near-zero change (-0.2%) for the demo AOI; that is honest, not a bug.
 7. Decide whether to flip `AuthEnabled=true` before submission (depends on
    whether the hackathon rubric rewards real user auth, and whether the
-   frontend's login flow is ready — `docs/DEPLOYMENT.md` §6).
+   frontend's login flow is ready — `docs/DEPLOYMENT.md` Part G; note it has no
+   per-user job isolation, so it implies more privacy than the system provides).
 8. **Live-analysis latency vs. drawn area** (measured this session, synchronous
    mode, live Sentinel-2): the ~25 km² demo field takes ~20-30 s, but a
    hand-drawn ~47 km² area took **~200 s**, and a second concurrent request
@@ -112,6 +115,48 @@ been run against a deployed backend or a real Cognito pool.
    hackathon, not for commercial use. Get a MapTiler/Mapbox key and change
    `BASEMAP` in `frontend/components/AOIMap.tsx`. Attribution is rendered and
    listed in `THIRD_PARTY_NOTICES.md`.
+
+## AWS deployment readiness (branch `infra/aws-deploy-fixes`)
+
+**The step-by-step runbook is `docs/DEPLOYMENT.md`** (every terminal command, with
+what to expect at each step). It was rewritten because the old one would have
+failed. **None of it has run against a real AWS account** — no SAM CLI or Docker
+was available where it was written. Expect the first deploy to surface something.
+
+Defects found by reading the template against how API Gateway/SAM/Lambda work,
+each reproduced or verified offline, then fixed:
+
+| Defect | Effect | Fix |
+|---|---|---|
+| Named API stage (`/dev`) | every route, `/health` included, returned 404 (FastAPI/Mangum don't strip the stage) | `$default` stage; `ApiUrl` has no prefix; regression test `tests/contract/test_lambda_handler.py` drives the real handler with API Gateway v2 events |
+| Hard-coded `ImageUri` to a repo nothing created | first deploy could not find an image | removed; `Metadata` on both functions; `sam deploy --resolve-image-repos` |
+| Worker timeout was an inherited 60 s | live jobs take up to ~200 s: killed, redelivered 3x, dead-lettered | worker 300 s, API 30 s, SQS visibility 1800 s |
+| No `.dockerignore` | build context = repo root (~300 MB `.venv`, `node_modules`, `.git`) | root `.dockerignore` |
+| Bedrock IAM unconditional, and only `foundation-model/*` in one region | comment said conditional; inference-profile model ids would AccessDeny | `Fn::If` on `BedrockOn`; profile + cross-region foundation-model resources; one action only |
+| Cognito client had no CLI-testable flow | token could only be minted via the console | added `ALLOW_ADMIN_USER_PASSWORD_AUTH` (IAM-credential-only) |
+| `explain()` swallowed Bedrock failures silently | a mis-configured Bedrock looked identical to a working one | logs `bedrock_explain_ok` / `bedrock_explain_fallback` (+ reason) |
+| Frontend: async jobs showed a bare badge; polling died on the first failed poll | UI looked frozen / job stranded on "created" | queued/analysing panel; 8-failure tolerance, then an honest "lost contact" message |
+| Static export wrote `/workspace.html` | hard refresh on any route 404s on static hosts | `output: "export"` + `trailingSlash: true` |
+
+Decisions taken (so nobody re-litigates them): region `us-west-2` (Sentinel-2 is
+there); frontend on **Amplify** (manual zip deploy); **`AuthEnabled=false` for the
+demo**; **no Strands**; deploy **sync first, then async**.
+
+Things to know that are easy to miss:
+
+- **Bedrock only writes the explanation text.** The API parses questions with the
+  deterministic parser; `parse_intent_bedrock` exists but `app/api/main.py` does not
+  call it. The root README and write-up used to claim otherwise (and "Strands");
+  corrected.
+- **No per-user job isolation** — with auth on, any signed-in user can list every job.
+- **The S3 results bucket is provisioned but unused.**
+- **Test-suite safety.** Installing `aws-sam-translator` (for cfn-lint) pulls in
+  `boto3`; two Bedrock tests that assumed boto3 was absent then made two real,
+  rejected `InvokeModel` calls under the developer's default AWS profile. Fixed:
+  `backend/tests/conftest.py` hides every credential source and blocks botocore
+  HTTP for the whole suite, and those tests now simulate a missing boto3
+  explicitly. Lesson: a test run is an AWS action too. Always pass an explicit
+  `--profile` for the Terra account; never rely on a default profile.
 
 ## Run it
 
@@ -209,7 +254,7 @@ provider `sentinel-2-l2a` (real) or `fixtures` (deterministic).
   JobStore-level failure propagates so SQS can retry/DLQ it.
 - Both features are new-code-tested but **never run against real AWS** — the
   same honest limitation this repo has applied to DynamoDB from the start.
-  Don't claim them "verified" until `docs/DEPLOYMENT.md` §4/§6/§7 have
+  Don't claim them "verified" until `docs/DEPLOYMENT.md` Parts C/D/G have
   actually been run once.
 
 ## Non-obvious lessons (each cost real debugging; don't relearn them)
@@ -302,10 +347,11 @@ bugs late in the build.
 
 ## Continuing from another laptop
 
-Clone the repo and **check out `frontend/continue`** (not `main` — this branch
-is 10 commits ahead of `main` and the entire frontend only exists here; merge or
-PR it into `main` first if you want `main` to be current; `claude/peaceful-gauss-osu4cl`
-is the same history minus this session's last 3 commits). Create the backend
+Clone the repo and **check out `infra/aws-deploy-fixes`** (not `main` — this branch
+is ahead of `main` and the entire frontend plus the AWS fixes only exist here; it
+already contains everything on `frontend/continue`. Merge or PR it into `main`
+first if you want `main` to be current; `claude/peaceful-gauss-osu4cl` is an
+older subset of the same history). Create the backend
 venv (`pip install -r backend/requirements-dev.txt`) and frontend
 `node_modules` as above ("Run it"). An *existing* venv created before the auth
 work needs a re-install too (`python-jose` is a new dependency). Open Claude Code in the repo folder; it loads `CLAUDE.md`, which points

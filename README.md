@@ -67,7 +67,7 @@ See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) and
 
 | Layer | Responsibility |
 |---|---|
-| **LLM (Bedrock + Strands)** | natural language → structured intent; explain the result |
+| **LLM (Amazon Bedrock, optional)** | writes the plain-language explanation of a result that has already been computed. Questions are parsed by a deterministic parser (a Bedrock intent adapter exists but the API does not call it yet); with Bedrock off, a deterministic template writes the explanation |
 | **Deterministic Python** | geometry, dates, scene filtering, raster reads, NDVI, statistics, comparison |
 
 The LLM never produces a scientific measurement. If Bedrock is unavailable, a
@@ -83,7 +83,7 @@ deterministic rule-based intent parser keeps the pipeline fully functional.
 | Raster/NDVI compute | Lambda (container image) | rasterio+GDAL exceed the zip limit |
 | Job state | DynamoDB | analysis lifecycle |
 | Results / evidence | S3 | result JSON, previews |
-| AI | Bedrock + Strands | intent + explanation |
+| AI (optional) | Bedrock | explanation text; deterministic fallback when off |
 | Observability | CloudWatch | structured logs, latency |
 | Infrastructure | SAM / CloudFormation | reproducible deploy (`infra/`) |
 | Satellite data | Sentinel-2 L2A COG (AWS Open Data) | actual imagery — no API key |

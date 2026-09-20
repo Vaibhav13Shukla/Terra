@@ -20,7 +20,7 @@ Fiber + Framer Motion) for the hackathon's UI presentation.
   style by default; swap `DEMO_STYLE` in `components/AOIMap.tsx` for a
   provider like MapTiler/Mapbox once you have a key)
 - **amazon-cognito-identity-js** — auth against the backend's Cognito User
-  Pool (see `../docs/DEPLOYMENT.md` §6 for where the pool/client ids come
+  Pool (see `../docs/DEPLOYMENT.md` Part G for where the pool/client ids come
   from)
 - **Zustand** — small client stores for auth and workspace state
 

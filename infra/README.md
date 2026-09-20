@@ -6,35 +6,24 @@ reviewed but not applied from this environment.** The steps below are exact
 and reproducible once credentials are available; nothing here is checked off
 that hasn't actually been run (§66).
 
-## Prerequisites
-
-- AWS account with credentials configured (`aws configure` or environment vars)
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
-- Docker (for the container-image Lambda build)
-- Bedrock model access requested in the target region, if `BedrockEnabled=true`
-  ([AWS docs](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html))
-
 ## Deploy
 
-```bash
-cd infra
-sam build --use-container
-sam deploy --guided \
-  --stack-name terra-dev \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides Stage=dev BedrockEnabled=false AuthEnabled=false ProcessingMode=sync
-```
+**One source of truth: [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md)** — every
+command in order (profile setup, budget, build, deploy, smoke tests, async,
+Amplify frontend, optional Bedrock/Cognito, teardown). This file only explains
+how the template is put together; it deliberately does not repeat the commands,
+so they cannot drift apart.
 
-See [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) for the full, step-by-step
-account setup (Bedrock model access, Cognito console steps, first deploy,
-smoke test, cost controls) — this file stays a quick reference.
+Things that are easy to get wrong and are handled in the template:
 
-`sam deploy --guided` prompts for region and confirms the change set before
-applying anything. The first deploy creates an ECR repository for the API
-container image; `sam build` pushes to it automatically.
-
-Outputs include `ApiUrl` — the base URL the frontend and demo scripts should
-target.
+- The API uses API Gateway's `$default` stage, so `ApiUrl` has **no stage prefix**.
+  A named stage makes every route 404 (the app does not strip `/dev`).
+- Neither function has an `ImageUri`. `sam build` builds the image from each
+  function's `Metadata` (Dockerfile `infra/Dockerfile`, build context = repo root,
+  trimmed by the root `.dockerignore`) and `sam deploy --resolve-image-repos`
+  creates the ECR repositories and pushes to them.
+- Timeouts: API 30 s (an HTTP API cuts an integration off at ~30 s anyway), worker
+  300 s, SQS visibility timeout 1800 s (>= 6x the worker's).
 
 ## What gets created
 
@@ -52,17 +41,25 @@ See [`template.yaml`](template.yaml) for the authoritative definition. Summary:
 | CloudWatch log groups (30-day retention) | structured logs, API + worker |
 
 IAM: each Lambda's role is scoped to CRUD on its own DynamoDB table and S3
-bucket, plus `bedrock:InvokeModel` only (and the API's role can additionally
-only `sqs:SendMessage` to its own queue) — never `AdministratorAccess` (§31, §91).
+bucket, plus `bedrock:InvokeModel` only — and only when `BedrockEnabled=true`
+(a `Condition` in the template; the resources are foundation models plus this
+account's inference profiles). The API's role can additionally only
+`sqs:SendMessage` to its own queue. Never `AdministratorAccess` (§31, §91).
 
 ## Validating without deploying
 
+From the repo root:
+
 ```bash
-sam validate --template template.yaml
+cfn-lint infra/template.yaml
 ```
 
-(Not run in this environment — no AWS CLI/SAM CLI installed here. Run this
-before the first real deploy.)
+Install `aws-sam-translator` alongside `cfn-lint` (`pip install cfn-lint aws-sam-translator`)
+so it runs the real SAM transform rather than only checking the syntax. Note that
+`aws-sam-translator` depends on `boto3`: the backend test suite guards against that
+(`backend/tests/conftest.py` hides real AWS credentials and blocks botocore HTTP).
+`sam validate --lint -t infra/template.yaml` needs the SAM CLI and an AWS profile;
+see the runbook (Part C1).
 
 ## Cost (§67)
 

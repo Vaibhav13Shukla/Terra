@@ -96,7 +96,7 @@ See [docs/architecture.md](architecture.md) for the full breakdown and
 ## 8. AWS usage
 
 API Gateway -> Lambda (container image, FastAPI/Mangum) -> DynamoDB (job
-state) + S3 (results) + Bedrock (optional, intent/explain) -> CloudWatch.
+state) + S3 (results) + Bedrock (optional, explanation text) -> CloudWatch.
 Every service answers "why does Terra need this?" — no service was added for
 the architecture diagram. **Deploy is pending AWS credentials**, stated
 plainly rather than claimed; the template is written and YAML-validated.

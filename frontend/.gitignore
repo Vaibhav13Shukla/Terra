@@ -16,6 +16,8 @@
 # next.js
 /.next/
 /out/
+# hosting upload artifact (built by docs/DEPLOYMENT.md step E2)
+/terra-frontend.zip
 
 # production
 /build
