@@ -84,9 +84,10 @@ as code, from a from-scratch repository (see git history):
 - **AWS infrastructure as code**: SAM template — API Gateway, Lambda
   (container image), DynamoDB, S3, optional Bedrock, CloudWatch, IAM least
   privilege.
-- **Tests**: 83 tests total (unit/integration/contract) — 80 run by default,
-  offline and deterministic; 3 are opt-in live-network tests against real
-  Sentinel-2 data.
+- **Tests**: 140 tests total (unit/integration/contract) — 137 run by default,
+  offline and deterministic (a suite-wide guard hides real AWS credentials and
+  blocks botocore HTTP, so the default run can never reach an AWS account); 3 are
+  opt-in live-network tests against real Sentinel-2 data.
 
 ## 7. Technical architecture
 
@@ -104,13 +105,15 @@ See [infra/README.md](../infra/README.md).
 
 ## 9. AI usage
 
-Amazon Bedrock is used for exactly two things, both optional with automatic
-deterministic fallback: mapping a question to a structured analysis intent,
-and explaining an already-computed result in plain language. It never
-computes a measurement — every NDVI value, every percentage change, every
-data-quality statistic comes from `app.processing` / `app.services`, in
-Python, tested independently of any LLM. This split is enforced by module
-boundaries (`app.services.analysis_engine` imports neither
+Amazon Bedrock is optional and does one thing today: it writes the plain-language
+explanation of an already-computed result, with automatic fallback to a
+deterministic template (the fallback is logged as `bedrock_explain_fallback`, so a
+mis-configured deployment is visible, not silent). Questions are mapped to an
+analysis intent by a **deterministic parser**; a Bedrock intent adapter exists and is
+unit-tested, but the API does not call it yet. Bedrock never computes a measurement —
+every NDVI value, every percentage change, every data-quality statistic comes from
+`app.processing` / `app.services`, in Python, tested independently of any LLM. This
+split is enforced by module boundaries (`app.services.analysis_engine` imports neither
 `app.agents.intent_parser` nor `app.agents.bedrock`), not just convention.
 
 ## 10. Data sources
@@ -136,7 +139,7 @@ separate live runs — variance is network-bound) found the same way.
 
 ## 12. Testing
 
-83 tests total (80 run by default, offline): unit (NDVI math, percentage
+140 tests total (137 run by default, offline): unit (NDVI math, percentage
 change, geometry validation, quality filtering, scene capping, intent
 parsing, Bedrock fallback), integration (the full pipeline against
 fixtures), contract (the API's request/response shapes and HTTP status
@@ -167,13 +170,20 @@ the brief's own AI-evaluation examples pinned as regression tests.
 - One analysis family in the MVP: NDVI snapshot/change. NDVI is a
   vegetation-vigor proxy; every result says so explicitly and never claims a
   causal determination (drought, irrigation failure) it cannot support.
-- AWS deployment is written as code, YAML-validated, and documented step by
-  step — but not applied, because this environment has no AWS credentials.
-- Synchronous request processing works (measured, live-verified) but is
-  close enough to API Gateway's 29-second timeout that the async worker
-  Lambda architecture the brief originally specifies is the correct next
-  step for guaranteed reliability at scale — documented in ADR 002, not
-  built untested.
+- AWS deployment is written as code, linted with the real SAM transform, and
+  documented command by command (`docs/DEPLOYMENT.md`) — but, unless the deployed
+  link in the submission says otherwise, not yet applied: the SAM CLI and Docker
+  were not available where it was written, so the container image has never been
+  built. Reading the template against how AWS behaves found and fixed defects that
+  would have broken a first deploy (every route 404 under a named API Gateway stage;
+  an image URI nothing created; a worker timeout shorter than real jobs).
+- Synchronous request processing works (measured, live-verified) for small areas,
+  but API Gateway's HTTP API cuts an integration off at ~30 s, so live analyses of
+  larger areas need the async path. That path (SQS + a worker Lambda, and progress
+  polling in the web UI) is built and tested offline, but has never run against a
+  real SQS queue.
+- There is no per-user job isolation: with login enabled, any signed-in user can
+  list every job. The demo therefore runs with login off.
 
 ## 15. Future vision
 

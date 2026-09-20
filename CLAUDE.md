@@ -12,9 +12,10 @@ Cognito auth + map workspace); see `frontend/README.md` and
 
 ## Golden rules (do not break)
 
-1. **Deterministic science, LLM only for language.** The LLM (Bedrock) maps
-   question -> structured intent and explains results. It NEVER computes NDVI,
-   cloud cover, or any measurement. All numbers come from `app/processing` and
+1. **Deterministic science, LLM only for language.** The LLM (Bedrock) may
+   explain results (and a Bedrock intent adapter exists, but the API currently
+   parses questions deterministically). It NEVER computes NDVI, cloud cover, or
+   any measurement. All numbers come from `app/processing` and
    `app/services` in Python.
 2. **Scientific honesty.** Report "NDVI decreased X%", never "the field is X%
    drier." Always surface data quality (scenes used/rejected, cloud, valid-pixel
