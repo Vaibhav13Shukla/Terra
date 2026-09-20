@@ -50,6 +50,10 @@ Parameters:
       so switching modes is a parameter change, not a redeploy of new
       resources.
 
+Conditions:
+  # Bedrock IAM permissions exist only when Bedrock is switched on.
+  BedrockOn: !Equals [!Ref BedrockEnabled, "true"]
+
 Globals:
   Function:
     # No global Timeout on purpose: the API and the worker have very different
@@ -137,15 +141,22 @@ Resources:
             BucketName: !Ref ResultsBucket
         - SQSSendMessagePolicy:
             QueueName: !GetAtt AnalysesQueue.QueueName
-        - Statement:
-            # Least privilege (§31, §91): only the Bedrock actions Terra
-            # actually calls, only when Bedrock is enabled at all. No
-            # AdministratorAccess, no wildcard resource beyond what Bedrock
-            # runtime invocation requires.
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+        # Least privilege (§31, §91): only the one Bedrock action Terra calls,
+        # and only when BedrockEnabled=true. Newer Claude models are invoked
+        # through an inference profile (modelId "us.anthropic..."); IAM then needs
+        # the profile ARN in this account AND the underlying foundation model in
+        # whichever regions the profile routes to — hence the region wildcard on
+        # foundation-model only. No wildcard action, no AdministratorAccess.
+        - !If
+          - BedrockOn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          - !Ref AWS::NoValue
 
   # ------------------------------------------------------------------ #
   # Async processing (ProcessingMode=async — see app.worker.handler)
@@ -198,11 +209,17 @@ Resources:
             TableName: !Ref AnalysesTable
         - S3CrudPolicy:
             BucketName: !Ref ResultsBucket
-        - Statement:
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+        # Same conditional, inference-profile-aware Bedrock permission as ApiFunction.
+        - !If
+          - BedrockOn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          - !Ref AWS::NoValue
 
   WorkerFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -244,6 +261,10 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
+        # Lets an operator with IAM credentials mint a test token from the CLI
+        # (aws cognito-idp admin-initiate-auth). Unlike USER_PASSWORD_AUTH it
+        # cannot be called from a browser or by anyone without AWS credentials.
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
       PreventUserExistenceErrors: ENABLED
       AccessTokenValidity: 1
       IdTokenValidity: 1
