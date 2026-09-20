@@ -3,11 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { friendlyError, terraApi } from "@/lib/api";
 import { DEMO_AOI, DEMO_DATES, DEMO_QUESTION, aoiBounds } from "@/lib/demo";
-import { isFixtureProvider } from "@/lib/format";
+import { TERMINAL_STATUSES, isFixtureProvider } from "@/lib/format";
 import { aoiAreaKm2, formatKm2 } from "@/lib/geo";
 import { useWorkspaceStore } from "@/lib/workspaceStore";
-
-const TERMINAL_STATUSES = new Set(["completed", "failed"]);
 
 // Measured against the real backend on live Sentinel-2 (synchronous mode):
 // the ~25 km² demo field finishes in roughly 20–30 s, while a hand-drawn

@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useWorkspaceStore } from "@/lib/workspaceStore";
 import { terraApi } from "@/lib/api";
+import { TERMINAL_STATUSES } from "@/lib/format";
 import type { AnalysisJob } from "@/lib/types";
 import { HistoryList } from "./HistoryList";
 import { QuestionForm } from "./QuestionForm";
 import { ResultView } from "./ResultView";
 
-const TERMINAL_STATUSES = new Set(["completed", "failed"]);
+// A single failed poll (a Lambda cold start, a brief 5xx) must not strand a job
+// on "queued" forever — but polling also must not hammer a dead API. 2.5 s x 8.
+const MAX_CONSECUTIVE_POLL_FAILURES = 8;
 
 type Tab = "new" | "history";
 
@@ -38,9 +41,10 @@ function TabButton({
 }
 
 export function InspectorPanel() {
-  const { job, polling, setJob, setPolling, error } = useWorkspaceStore();
+  const { job, polling, setJob, setPolling, setError, error } = useWorkspaceStore();
   const [tab, setTab] = useState<Tab>("new");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const failuresRef = useRef(0);
 
   // Poll an in-flight job until it reaches a terminal status. With the default
   // synchronous backend the POST already returns a finished job, so this only
@@ -51,18 +55,26 @@ export function InspectorPanel() {
     intervalRef.current = setInterval(async () => {
       try {
         const updated = await terraApi.getAnalysis(job.job_id);
+        failuresRef.current = 0;
         setJob(updated);
         if (TERMINAL_STATUSES.has(updated.status)) {
           setPolling(false);
         }
       } catch {
-        setPolling(false);
+        failuresRef.current += 1;
+        if (failuresRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          failuresRef.current = 0;
+          setPolling(false);
+          setError(
+            "Lost contact with the API while waiting for this analysis. It may still be running — open it from History to check.",
+          );
+        }
       }
     }, 2500);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [polling, job, setJob, setPolling]);
+  }, [polling, job, setJob, setPolling, setError]);
 
   function openFromHistory(selected: AnalysisJob) {
     setJob(selected);
@@ -93,7 +105,7 @@ export function InspectorPanel() {
         {tab === "history" ? (
           <HistoryList onOpen={openFromHistory} />
         ) : job ? (
-          <ResultView job={job} />
+          <ResultView job={job} polling={polling} />
         ) : (
           <QuestionForm />
         )}

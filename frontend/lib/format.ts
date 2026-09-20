@@ -1,4 +1,23 @@
-import type { AnalysisJob, AnalysisType, DateRange } from "./types";
+import type { AnalysisJob, AnalysisType, DateRange, JobStatus } from "./types";
+
+/** Statuses after which a job will never change again — polling can stop. */
+export const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set<JobStatus>([
+  "completed",
+  "failed",
+]);
+
+/** True while a job is still queued or being processed. In async mode
+ *  (TERRA_PROCESSING_MODE=async) the POST returns a "created" job with no
+ *  result and a worker finishes it later; the UI must say so, not sit blank. */
+export function isRunning(job: AnalysisJob): boolean {
+  return !TERMINAL_STATUSES.has(job.status);
+}
+
+/** Human wording for a job status. "created" means accepted and waiting for a
+ *  worker, which reads better as "queued". */
+export function statusLabel(status: JobStatus): string {
+  return status === "created" ? "queued" : status;
+}
 
 // Dates from the API are plain YYYY-MM-DD calendar dates. Parse and format
 // them in UTC so a viewer in any timezone sees the same day the backend used

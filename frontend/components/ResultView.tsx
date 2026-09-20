@@ -9,7 +9,9 @@ import {
   formatRange,
   hasNoData,
   isFixtureProvider,
+  isRunning,
   providerLabel,
+  statusLabel,
   stripLimitations,
 } from "@/lib/format";
 import type { AnalysisJob } from "@/lib/types";
@@ -36,7 +38,7 @@ function StatusBadge({
     <span
       className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${color}`}
     >
-      {showNoData ? "no data" : status}
+      {showNoData ? "no data" : statusLabel(status)}
     </span>
   );
 }
@@ -98,7 +100,14 @@ function buildCurl(job: AnalysisJob): string {
   return lines.join(" \\\n");
 }
 
-export function ResultView({ job }: { job: AnalysisJob }) {
+export function ResultView({
+  job,
+  polling = false,
+}: {
+  job: AnalysisJob;
+  /** Whether the workspace is currently polling this job for updates. */
+  polling?: boolean;
+}) {
   const result = job.result;
   const metric = result?.metric;
   const change = metric?.percentage_change;
@@ -140,7 +149,27 @@ export function ResultView({ job }: { job: AnalysisJob }) {
         </p>
       )}
 
-      {noResult ? (
+      {isRunning(job) ? (
+        <div
+          role="status"
+          className="rounded-[var(--radius-sm)] border border-border-strong bg-inset p-4"
+        >
+          <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <span
+              aria-hidden
+              className="inline-block h-2 w-2 animate-pulse rounded-full bg-text-secondary"
+            />
+            {job.status === "created"
+              ? "Queued — waiting for a worker"
+              : "Analysing Sentinel-2 scenes…"}
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+            {polling
+              ? "This page checks for the result every few seconds. Live analyses can take from about half a minute to several minutes, depending on the size of the area."
+              : "This page is no longer checking for updates. Reopen this analysis from History to see whether it has finished."}
+          </p>
+        </div>
+      ) : noResult ? (
         <div className="rounded-[var(--radius-sm)] border border-border-strong bg-inset p-4">
           <p className="text-sm font-medium text-text-primary">
             No result for this request
